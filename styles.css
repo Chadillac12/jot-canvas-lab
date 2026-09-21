@@ -1481,3 +1481,21 @@ body .canvas-node.canvas-pencil-highlight-ink,
 	pointer-events: none;
 	opacity: 0.72;
 }
+
+
+/* Beta 2: Jot-compatible ink rendered directly over native PDF.js pages. */
+.jot-canvas-pdf-page {
+	position: relative !important;
+}
+
+.jot-canvas-pdf-ink {
+	position: absolute;
+	inset: 0;
+	z-index: 50;
+	pointer-events: none;
+	touch-action: none;
+}
+
+.jot-canvas-pdf-source .pdfViewer {
+	transform-origin: top center;
+}
