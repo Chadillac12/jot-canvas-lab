@@ -412,12 +412,13 @@ export class PdfSourceSurfaceManager {
 	private findPageHit(canvas: CanvasSurfaceHost, x: number, y: number) {
 		const nodeHit = this.findPdfNodeHit(canvas, x, y);
 		if (!nodeHit) return null;
-		for (const page of nodeHit.nodeEl.querySelectorAll<HTMLElement>(".page")) {
+		const pages = Array.from(nodeHit.nodeEl.querySelectorAll(".page")) as HTMLElement[];
+		for (const page of pages) {
 			if (!containsPoint(page.getBoundingClientRect(), x, y)) continue;
 			const raw = page.getAttribute("data-page-number");
 			const pageNumber = raw ? Number.parseInt(raw, 10) : NaN;
 			if (!Number.isFinite(pageNumber)) continue;
-			const overlay = page.querySelector<HTMLCanvasElement>(`canvas.${INK_OVERLAY_CLASS}`);
+			const overlay = page.querySelector(`canvas.${INK_OVERLAY_CLASS}`) as HTMLCanvasElement | null;
 			if (!overlay) continue;
 			return { ...nodeHit, page, pageNumber, overlay };
 		}
