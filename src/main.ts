@@ -10,6 +10,7 @@ import {
 	setIcon,
 } from "obsidian";
 import { getStroke } from "perfect-freehand";
+import { PdfSourceSurfaceManager } from "./surfaces/pdf-source-surface";
 
 // ---------- Settings ----------
 
@@ -731,9 +732,11 @@ type CardMode = "empty" | "new" | "existing";
 export default class CanvasPencilPlugin extends Plugin {
 	settings: CanvasPencilSettings;
 	private toolbars = new Map<CanvasViewLike, CanvasToolbar>();
+	private pdfSurfaces!: PdfSourceSurfaceManager;
 
 	async onload() {
 		await this.loadSettings();
+		this.pdfSurfaces = new PdfSourceSurfaceManager();
 		this.applyBottomBarVisibility();
 		this.addSettingTab(new CanvasPencilSettingTab(this.app, this));
 
@@ -746,6 +749,20 @@ export default class CanvasPencilPlugin extends Plugin {
 				if (!checking) {
 					const tb = this.toolbars.get(view);
 					tb?.setTool(tb.tool === "marker" ? "select" : "marker");
+				}
+				return true;
+			},
+		});
+
+		this.addCommand({
+			id: "refresh-pdf-source-surfaces",
+			name: "Refresh PDF source surfaces on active canvas",
+			checkCallback: (checking) => {
+				const view = this.getActiveCanvasView();
+				if (!view?.canvas) return false;
+				if (!checking) {
+					const count = this.pdfSurfaces.refresh(view.canvas);
+					new Notice(`Jot Canvas Lab: ${count} PDF source surface${count === 1 ? "" : "s"} ready`);
 				}
 				return true;
 			},
@@ -765,6 +782,7 @@ export default class CanvasPencilPlugin extends Plugin {
 	}
 
 	onunload() {
+		this.pdfSurfaces?.destroy();
 		for (const tb of this.toolbars.values()) tb.destroy();
 		this.toolbars.clear();
 		activeDocument.body.removeClass("canvas-kit-hide-bottom-bar");
@@ -811,12 +829,14 @@ export default class CanvasPencilPlugin extends Plugin {
 			const view = leaf.view as CanvasViewLike;
 			if (!view.canvas) continue;
 			live.add(view);
+			this.pdfSurfaces.attach(view.canvas);
 			if (!this.toolbars.has(view)) {
 				this.toolbars.set(view, new CanvasToolbar(this, view));
 			}
 		}
 		for (const [view, tb] of this.toolbars) {
 			if (!live.has(view)) {
+				if (view.canvas) this.pdfSurfaces.detach(view.canvas);
 				tb.destroy();
 				this.toolbars.delete(view);
 			}

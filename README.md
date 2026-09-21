@@ -1,95 +1,62 @@
+# Jot Canvas Lab
 
+**Experimental Obsidian plugin for turning Canvas cards into interactive source surfaces.**
 
-# Canvas Kit
+This repository started from [Canvas Kit](https://github.com/yaye-work/canvas-kit) by yaye.work and is being used as a lab for combining Canvas Kit's spatial workflow with ideas from [Jot](https://github.com/Chadillac12/jot).
 
-<img alt="banner" src="https://github.com/user-attachments/assets/6ad8997c-c35f-497c-b6f5-ca2cd57186fa" />
+> This is a development lab, not a replacement for Jot or Canvas Kit yet.
 
+## Goal
 
-Add marker, highlighter, tape, text tool, quick drag-out card, make new notes or embed straight in the canvas FAST. Interactive table.
-Your canvas power house with annonations.
+The first target workflow is:
 
-Ink is stored as inline SVG inside ordinary canvas text nodes — **no separate files, no drawings folder**. Everything lives in the canvas file itself.
+1. place a PDF in an Obsidian Canvas;
+2. scroll the complete document inside the Canvas node instead of treating the card as a fixed-page preview;
+3. annotate pages with Jot-style normalized Apple Pencil ink;
+4. create quick notes anchored to exact PDF locations;
+5. later apply the same anchor model to video timestamps and images.
 
-## Tools
+## Current prototype: Phase 1
 
-- **Select Area** (`S`) — drag a marquee to select everything it touches, then move or delete the lot. Especially handy on iPad, where drag-to-select isn't otherwise available. While any tool is active on touch devices: **two-finger tap = undo, three-finger tap = redo**, and two fingers pan/pinch-zoom the canvas.
+The `feature/pdf-source-surface` work introduces a **PDF source surface** layer around native PDF Canvas nodes.
 
-- **Draw Kit** (`M`) — Smooth freehand Marker,Highlighter, Washi Tape with different designs (you can also upload any image and it will become a tape).
-<img alt="Draw Kit" src="https://github.com/user-attachments/assets/ac19f481-9e50-4142-8488-867a68072064" />
+For now it:
 
-- **Just Text Please** (`T`) — click anywhere and start typing, no outline or nested in a card. Supports markdown. Resize a text to scale it uniformly, recolor it with the node's color button, and re-open it for editing via the Edit button.
-<img alt="TEXT" src="https://github.com/user-attachments/assets/97ab5f95-1dae-4f19-af4c-8ec95459e474" />
+- detects Canvas file nodes that reference PDFs;
+- gives the native embedded PDF viewer an explicit internal scroll boundary;
+- prevents PDF wheel/pointer gestures from leaking into Canvas drag/pan while the document can consume them;
+- supports both newer `.pdf-viewer-container` and older `.pdf-scroll-container` PDF DOM variants;
+- keeps the implementation isolated so Jot's annotation engine can be attached in the next phase.
 
-- **Better Cards** (`C`) — Create and resize your card in a single drag. Quick add existing note and new note. 
-<img alt="card" src="https://github.com/user-attachments/assets/74d1e109-7471-40ce-a876-8e9bb2f18558" />
+Run the command **Jot Canvas Lab: Refresh PDF source surfaces on active canvas** if you want to force a rescan while testing.
 
-  A sub-toolbar picks what the card is:
-    - *Empty* — a blank card.
-    - *New note* — creates a note in your vault and embeds it in one gesture.
-    - *Existing note* — pick a note from an inline search and drop it in.
-    - A blank card also shows **new note / embed** buttons on its edge while selected, so you can turn it into a new or existing note in place.
-  
-- **Drag and Make Section** (`G`) — Similar to Figma's frame tool: drag a marquee to create a section; then you can rename the section straight away.
+## Architecture
 
-<img width="749" height="517" alt="Drag Section" src="https://github.com/user-attachments/assets/77cd12ae-9c91-4683-be2c-3812902f3fda" />
+See [docs/architecture.md](docs/architecture.md).
 
-- **Table** (`B`) — drag to set rows × columns; a borderless, interactive table you can edit in place. Drag the row/column handles to reorder, **click** a handle to select a row/column (then delete it with the trash button or `Delete`), and drag the dividers to resize.
-<img width="749" height="517" alt="Table" src="https://github.com/user-attachments/assets/cc7b22b5-cdfd-4072-afbc-794f990db8b0" />
+The central idea is to keep three responsibilities separate:
 
-- **Image** (`I`) — a previewable image picker: search your vault's images as thumbnails, or **upload** one from your computer, then drag to place it.
-<img width="749" height="517" alt="image" src="https://github.com/user-attachments/assets/55512b41-f7af-442a-a444-652b5cdc3295" />
-
-## Tips
-
-- **Right-click** exits the current tool (back to Select). Right-clicking while editing text finishes the edit.
-- The draw button remembers the last sub-tool you used and reopens it.
-
-## Settings
-
-- **Toolbar size** — scale the toolbar to taste.
-- **Hide Obsidian's bottom bar** — hide the built-in add-to-canvas bar (Canvas Kit replaces it).
-- **Default marker color / size**, **default text size**, and a slot to remove a custom tape image.
-- **Handwriting to text** — MyScript application + HMAC keys and the recognition language.
-
-## Install
-
-### From Community Plugins
-
-*Settings → Community plugins → Browse*, search for **Canvas Kit**, install, and enable. (Pending review.)
-
-### Manual
-
-1. Download `main.js`, `manifest.json`, and `styles.css` from the [latest release](https://github.com/yaye-work/canvas-kit/releases).
-2. Copy them into `<vault>/.obsidian/plugins/canvas-kit/`.
-3. Reload Obsidian and enable **Canvas Kit** in *Settings → Community plugins*.
-
-## Caveats
-
-- Canvas has no official plugin API; this relies on undocumented internals (e.g. `posFromEvt`, `createTextNode`, `createFileNode`, `createGroupNode`, `removeNode`) and may need a patch after an Obsidian update.
-- On devices without the plugin, ink nodes render as the raw SVG markup (or whatever Obsidian's markdown HTML rendering makes of it) and borderless nodes get their frame back — content is never lost, only styling.
+- **Canvas** owns spatial layout.
+- **Source surfaces** own source navigation and interaction.
+- **Jot** owns portable per-document annotation data.
 
 ## Development
 
 ```sh
 npm install
-npm run dev    # watch build
-npm run build  # type-check + production build
+npm run build
 ```
 
-## License
+For manual testing, copy `main.js`, `manifest.json`, and `styles.css` into:
 
-[MIT](LICENSE) © yaye.work
+```text
+<vault>/.obsidian/plugins/jot-canvas-lab/
+```
 
-## Support
+The plugin ID is intentionally different from Canvas Kit so both can be installed side-by-side during development. Disable one if their toolbars conflict during testing.
 
-Thank you for using Canvas Kit! If you run into a bug or have an idea, please open an issue. Feature requests and bug reports are very welcome.
+## Upstream attribution
 
-And if you find CanvasKit useful, you can:
+Canvas UI/tooling in this lab is derived from **Canvas Kit** © yaye.work under the MIT License. The original license is retained in this repository.
 
-[<img width=auto height="70" alt="buymea bubbletea" src="https://github.com/user-attachments/assets/0f9d8765-d124-4e63-8668-bf06100b7c0a" />](https://buymeacoffee.com/yaye.work)
-
-It's genuinely appreciated.
-
-Happy noting! 
-Yaye
-
+Jot is maintained separately at https://github.com/Chadillac12/jot and remains the reference implementation for normalized PDF ink/sidecar behavior.

@@ -1,7 +1,7 @@
 {
-  "name": "canvas-kit",
-  "version": "0.2.5",
-  "description": "A FigJam-style annotation toolbar for Obsidian Canvas.",
+  "name": "jot-canvas-lab",
+  "version": "0.0.1",
+  "description": "Experimental interactive source surfaces for Obsidian Canvas.",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",
@@ -12,20 +12,20 @@
     "obsidian",
     "obsidian-plugin",
     "canvas",
+    "pdf",
     "annotation",
-    "drawing",
-    "figjam"
+    "apple-pencil"
   ],
-  "author": "yaye.work",
+  "author": "Chadillac12",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/yaye-work/canvas-kit.git"
+    "url": "git+https://github.com/Chadillac12/jot-canvas-lab.git"
   },
   "bugs": {
-    "url": "https://github.com/yaye-work/canvas-kit/issues"
+    "url": "https://github.com/Chadillac12/jot-canvas-lab/issues"
   },
-  "homepage": "https://github.com/yaye-work/canvas-kit",
+  "homepage": "https://github.com/Chadillac12/jot-canvas-lab",
   "devDependencies": {
     "@types/node": "^20.11.0",
     "esbuild": "^0.21.0",
