@@ -40,6 +40,22 @@ The central idea is to keep three responsibilities separate:
 - **Source surfaces** own source navigation and interaction.
 - **Jot** owns portable per-document annotation data.
 
+## Install with BRAT (recommended for this lab)
+
+This lab is published as a GitHub **pre-release** specifically for BRAT testing.
+
+1. Install and enable **BRAT** in Obsidian.
+2. Open **Settings → BRAT**.
+3. Choose **Add Beta plugin**.
+4. Paste this repository URL:
+
+   `https://github.com/Chadillac12/jot-canvas-lab`
+
+5. Choose the latest version when BRAT asks (currently `0.0.1-beta.1`).
+6. Let BRAT install the release, then enable **Jot Canvas Lab** under **Community plugins**.
+
+The plugin ID is `jot-canvas-lab`, so it installs separately from Canvas Kit. For the first PDF-surface test, disable regular Canvas Kit so its toolbar/input handlers do not compete with the lab fork.
+
 ## Development
 
 ```sh
