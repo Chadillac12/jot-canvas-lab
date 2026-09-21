@@ -1448,9 +1448,28 @@ body .canvas-node.canvas-pencil-highlight-ink,
 	overflow: hidden;
 }
 
-.canvas-node.jot-canvas-pdf-source .pdf-container {
+.canvas-node.jot-canvas-pdf-source .canvas-node-content,
+.canvas-node.jot-canvas-pdf-source .file-embed,
+.canvas-node.jot-canvas-pdf-source .internal-embed,
+.canvas-node.jot-canvas-pdf-source .pdf-embed {
 	height: 100%;
 	min-height: 0;
+}
+
+.canvas-node.jot-canvas-pdf-source .pdf-container {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	min-height: 0;
+}
+
+.canvas-node.jot-canvas-pdf-source .pdf-toolbar {
+	flex: 0 0 auto;
+}
+
+.canvas-node.jot-canvas-pdf-source .pdf-viewer-container,
+.canvas-node.jot-canvas-pdf-source .pdf-scroll-container {
+	flex: 1 1 auto;
 }
 
 .canvas-node.jot-canvas-pdf-source .jot-canvas-pdf-scroll-host,
@@ -1483,7 +1502,7 @@ body .canvas-node.canvas-pencil-highlight-ink,
 }
 
 
-/* Beta 2: Jot-compatible ink rendered directly over native PDF.js pages. */
+/* Beta 3: Jot-compatible ink with lazy per-page backing stores. */
 .jot-canvas-pdf-page {
 	position: relative !important;
 }
@@ -1494,8 +1513,4 @@ body .canvas-node.canvas-pencil-highlight-ink,
 	z-index: 50;
 	pointer-events: none;
 	touch-action: none;
-}
-
-.jot-canvas-pdf-source .pdfViewer {
-	transform-origin: top center;
 }
