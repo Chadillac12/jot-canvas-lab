@@ -28,3 +28,12 @@ jobs:
 
       - name: Type-check and build
         run: npm run build
+
+      - name: Package test build
+        uses: actions/upload-artifact@v4
+        with:
+          name: jot-canvas-lab-test-build
+          path: |
+            main.js
+            manifest.json
+            styles.css
