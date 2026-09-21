@@ -126,13 +126,15 @@ export class PdfSourceSurfaceManager {
 			(e) => {
 				if (canConsumeWheel(scrollHost, e)) e.stopPropagation();
 			},
-			{ capture: true, passive: true }
+			{ capture: false, passive: true }
 		);
 
-		// Stop Canvas from claiming direct manipulation that starts inside the
-		// document. We do not preventDefault(), so native PDF scrolling and future
-		// Jot Pencil handlers can still consume the gesture.
-		for (const type of ["pointerdown", "pointermove", "pointerup"] as const) {
+		// Let the PDF and its child controls receive the event first, then stop the
+		// bubble before Canvas can reinterpret it as a node drag/pan. Do not use
+		// capture here: a capture-phase stop on this ancestor can prevent PDF page
+		// controls or a future Jot overlay from seeing the pointer at all.
+		// We also do not preventDefault(), so native document scrolling remains live.
+		for (const type of ["pointerdown", "pointermove", "pointerup", "pointercancel"] as const) {
 			scrollHost.addEventListener(type, (e) => e.stopPropagation(), {
 				capture: true,
 				passive: true,
