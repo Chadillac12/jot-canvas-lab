@@ -10,7 +10,10 @@ import {
 	setIcon,
 } from "obsidian";
 import { getStroke } from "perfect-freehand";
-import { PdfSourceSurfaceManager } from "./surfaces/pdf-source-surface";
+import {
+	PdfSourceSurfaceManager,
+	type PdfInkStyle,
+} from "./surfaces/pdf-source-surface";
 
 // ---------- Settings ----------
 
@@ -736,7 +739,7 @@ export default class CanvasPencilPlugin extends Plugin {
 
 	async onload() {
 		await this.loadSettings();
-		this.pdfSurfaces = new PdfSourceSurfaceManager();
+		this.pdfSurfaces = new PdfSourceSurfaceManager(this.app.vault.adapter);
 		this.applyBottomBarVisibility();
 		this.addSettingTab(new CanvasPencilSettingTab(this.app, this));
 
@@ -805,6 +808,44 @@ export default class CanvasPencilPlugin extends Plugin {
 		for (const [view, tb] of this.toolbars) {
 			if (view.canvas === canvas) return tb;
 		}
+		return null;
+	}
+
+	/** Route Canvas drawing tools into a PDF source surface when the Pencil lands on one. */
+	beginPdfInk(canvas: CanvasLike, e: PointerEvent, tb: CanvasToolbar): boolean {
+		const style = this.pdfInkStyle(tb);
+		return style ? this.pdfSurfaces.beginInk(canvas, e, style) : false;
+	}
+
+	movePdfInk(canvas: CanvasLike, e: PointerEvent): boolean {
+		return this.pdfSurfaces.moveInk(canvas, e);
+	}
+
+	endPdfInk(canvas: CanvasLike, e: PointerEvent): boolean {
+		return this.pdfSurfaces.endInk(canvas, e);
+	}
+
+	beginPdfTouchScroll(canvas: CanvasLike, e: PointerEvent): boolean {
+		return this.pdfSurfaces.beginTouchScroll(canvas, e);
+	}
+
+	movePdfTouchScroll(canvas: CanvasLike, e: PointerEvent): boolean {
+		return this.pdfSurfaces.moveTouchScroll(canvas, e);
+	}
+
+	endPdfTouchScroll(canvas: CanvasLike, e: PointerEvent): boolean {
+		return this.pdfSurfaces.endTouchScroll(canvas, e);
+	}
+
+	cancelPdfInteraction(canvas: CanvasLike): void {
+		this.pdfSurfaces.cancelInteraction(canvas);
+	}
+
+	private pdfInkStyle(tb: CanvasToolbar): PdfInkStyle | null {
+		const width = Math.max(0.0008, tb.markerSize * 0.00125);
+		if (tb.markerMode === "draw") return { mode: "pen", color: tb.markerColor, width };
+		if (tb.markerMode === "highlight") return { mode: "highlighter", color: tb.highlightColor, width };
+		if (tb.markerMode === "erase") return { mode: "eraser", color: tb.markerColor, width };
 		return null;
 	}
 
@@ -3209,6 +3250,9 @@ class MarkerOverlay extends ToolOverlay {
 
 	/** Second finger landed — this is a pan/zoom, not a stroke. Drop the stroke. */
 	protected onGestureStart() {
+		this.tb.plugin.cancelPdfInteraction(this.canvas);
+		this.pdfInkActive = false;
+		this.pdfTouchScrollActive = false;
 		this.current = null;
 		this.activePointer = null;
 		this.fingerPan = null;
@@ -3251,6 +3295,8 @@ class MarkerOverlay extends ToolOverlay {
 	private fingerPan: { x: number; y: number; sx: number; sy: number } | null = null;
 	/** The object under a finger's press — selected on tap, ignored on pan/drag. */
 	private fingerHit: CanvasNodeLike | null = null;
+	private pdfInkActive = false;
+	private pdfTouchScrollActive = false;
 
 	private bind() {
 		const el = this.canvasEl;
@@ -3262,6 +3308,20 @@ class MarkerOverlay extends ToolOverlay {
 			if (e.pointerType === "touch" && this.tb.penBlocksTouch()) return;
 			if (this.gesturing() || (e.pointerType === "touch" && !e.isPrimary)) {
 				this.current = null;
+				return;
+			}
+			if (e.pointerType === "touch" && this.tb.plugin.beginPdfTouchScroll(this.canvas, e)) {
+				el.setPointerCapture(e.pointerId);
+				this.activePointer = e.pointerId;
+				this.pdfTouchScrollActive = true;
+				e.preventDefault();
+				return;
+			}
+			if (e.pointerType !== "touch" && this.tb.markerMode !== "tape" && this.tb.plugin.beginPdfInk(this.canvas, e, this.tb)) {
+				el.setPointerCapture(e.pointerId);
+				this.activePointer = e.pointerId;
+				this.pdfInkActive = true;
+				e.preventDefault();
 				return;
 			}
 			el.setPointerCapture(e.pointerId);
@@ -3301,6 +3361,16 @@ class MarkerOverlay extends ToolOverlay {
 		el.addEventListener("pointermove", (e) => {
 			if (this.gesturing()) return;
 			if (this.activePointer !== null && e.pointerId !== this.activePointer) return;
+			if (this.pdfTouchScrollActive) {
+				this.tb.plugin.movePdfTouchScroll(this.canvas, e);
+				e.preventDefault();
+				return;
+			}
+			if (this.pdfInkActive) {
+				this.tb.plugin.movePdfInk(this.canvas, e);
+				e.preventDefault();
+				return;
+			}
 			// Pencil-only finger pan.
 			if (this.fingerPan) {
 				const dx = e.clientX - this.fingerPan.x;
@@ -3360,6 +3430,20 @@ class MarkerOverlay extends ToolOverlay {
 			// Only the pointer that started the stroke may end it — a palm lift
 			// mid-stroke must not commit the pen's stroke early.
 			if (this.activePointer !== null && e.pointerId !== this.activePointer) return;
+			if (this.pdfTouchScrollActive) {
+				this.tb.plugin.endPdfTouchScroll(this.canvas, e);
+				this.pdfTouchScrollActive = false;
+				this.activePointer = null;
+				e.preventDefault();
+				return;
+			}
+			if (this.pdfInkActive) {
+				this.tb.plugin.endPdfInk(this.canvas, e);
+				this.pdfInkActive = false;
+				this.activePointer = null;
+				e.preventDefault();
+				return;
+			}
 			this.activePointer = null;
 			if (this.fingerPan) {
 				const fp = this.fingerPan;
@@ -3405,6 +3489,9 @@ class MarkerOverlay extends ToolOverlay {
 		el.addEventListener("contextmenu", (e) => {
 			e.preventDefault();
 			e.stopPropagation();
+			this.tb.plugin.cancelPdfInteraction(this.canvas);
+			this.pdfInkActive = false;
+			this.pdfTouchScrollActive = false;
 			this.activePointer = null;
 			if (this.tapeStart && this.tapeEnd) {
 				const a = this.tapeStart;
