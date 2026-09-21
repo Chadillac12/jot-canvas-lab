@@ -102,9 +102,9 @@ function clamp01(v: number): number {
 export class PdfSourceSurfaceManager {
 	private observers = new Map<CanvasSurfaceHost, MutationObserver>();
 	private scheduled = new WeakSet<CanvasSurfaceHost>();
-	private pageObservers = new WeakSet<HTMLElement>();
-	private nodeResizeObservers = new Map<HTMLElement, ResizeObserver>();
-	private fitBaseWidths = new WeakMap<HTMLElement, number>();
+	private pageResizeObservers = new Map<HTMLElement, ResizeObserver>();
+	private pageIntersectionObservers = new Map<HTMLElement, IntersectionObserver>();
+	private pageRegistrations = new WeakMap<HTMLElement, { pdfPath: string; pageNumber: number }>();
 	private ink: JotInkStore;
 	private inkSession: InkSession | null = null;
 	private touchSession: TouchScrollSession | null = null;
@@ -132,9 +132,11 @@ export class PdfSourceSurfaceManager {
 
 	destroy(): void {
 		for (const observer of this.observers.values()) observer.disconnect();
-		for (const observer of this.nodeResizeObservers.values()) observer.disconnect();
+		for (const observer of this.pageResizeObservers.values()) observer.disconnect();
+		for (const observer of this.pageIntersectionObservers.values()) observer.disconnect();
 		this.observers.clear();
-		this.nodeResizeObservers.clear();
+		this.pageResizeObservers.clear();
+		this.pageIntersectionObservers.clear();
 		this.ink.destroy();
 		this.inkSession = null;
 		this.touchSession = null;
@@ -256,16 +258,16 @@ export class PdfSourceSurfaceManager {
 
 		nodeEl.classList.add(SOURCE_CLASS);
 		nodeEl.dataset.jotCanvasSourcePath = pdfPath;
-		void this.ink.ensureLoaded(pdfPath).then(() => this.refresh(canvas));
-		this.observeNodeSize(nodeEl, canvas);
+		if (!this.ink.isLoaded(pdfPath)) {
+			void this.ink.ensureLoaded(pdfPath).then(() => this.scheduleRefresh(canvas));
+		}
 
 		const scrollHost = findScrollHost(nodeEl);
 		if (scrollHost) {
 			scrollHost.classList.add(SCROLL_HOST_CLASS);
 			this.bindScrollBoundary(scrollHost);
-			this.fitViewerToNode(nodeEl, scrollHost);
+			this.upgradePages(nodeEl, pdfPath, scrollHost);
 		}
-		this.upgradePages(nodeEl, pdfPath);
 		return true;
 	}
 
@@ -287,59 +289,79 @@ export class PdfSourceSurfaceManager {
 		}
 	}
 
-	private observeNodeSize(nodeEl: HTMLElement, canvas: CanvasSurfaceHost): void {
-		if (this.nodeResizeObservers.has(nodeEl)) return;
-		const observer = new ResizeObserver(() => {
-			const host = findScrollHost(nodeEl);
-			if (host) this.fitViewerToNode(nodeEl, host);
-			this.scheduleRefresh(canvas);
-		});
-		observer.observe(nodeEl);
-		this.nodeResizeObservers.set(nodeEl, observer);
-	}
-
-	private fitViewerToNode(nodeEl: HTMLElement, host: HTMLElement): void {
-		const viewer = nodeEl.querySelector<HTMLElement>(".pdfViewer");
-		const firstPage = viewer?.querySelector<HTMLElement>(".page");
-		if (!viewer || !firstPage || host.clientWidth <= 0) return;
-		let baseWidth = this.fitBaseWidths.get(viewer);
-		if (!baseWidth) {
-			baseWidth = Math.max(1, firstPage.offsetWidth || firstPage.getBoundingClientRect().width);
-			this.fitBaseWidths.set(viewer, baseWidth);
-		}
-		const available = Math.max(120, host.clientWidth - 16);
-		const scale = Math.max(0.5, Math.min(3, available / baseWidth));
-		viewer.style.zoom = String(scale);
-	}
-
-	private upgradePages(nodeEl: HTMLElement, pdfPath: string): void {
-		nodeEl.querySelectorAll<HTMLElement>(".page").forEach((page) => {
+	private upgradePages(nodeEl: HTMLElement, pdfPath: string, scrollHost: HTMLElement): void {
+		const observer = this.intersectionObserverFor(scrollHost);
+		const pages = Array.from(nodeEl.querySelectorAll(".page")) as HTMLElement[];
+		for (const page of pages) {
 			const raw = page.getAttribute("data-page-number");
 			const pageNumber = raw ? Number.parseInt(raw, 10) : NaN;
-			if (!Number.isFinite(pageNumber)) return;
+			if (!Number.isFinite(pageNumber)) continue;
 			page.classList.add(PAGE_CLASS);
-			const key = pageKey(pdfPath, pageNumber);
-			let overlay = page.querySelector<HTMLCanvasElement>(`canvas.${INK_OVERLAY_CLASS}`);
-			if (!overlay) {
-				overlay = page.ownerDocument.createElement("canvas");
-				overlay.className = INK_OVERLAY_CLASS;
-				page.appendChild(overlay);
-			}
-			overlay.setAttribute(INK_KEY_ATTR, key);
-			this.sizeOverlayToPage(overlay, page);
-			this.observePage(page, overlay);
-			this.redrawOverlay(overlay);
-		});
+			this.pageRegistrations.set(page, { pdfPath, pageNumber });
+			if (observer) observer.observe(page);
+			else this.activatePage(page);
+		}
 	}
 
-	private observePage(page: HTMLElement, overlay: HTMLCanvasElement): void {
-		if (this.pageObservers.has(page)) return;
-		this.pageObservers.add(page);
-		new ResizeObserver(() => {
-			if (!page.isConnected || !overlay.isConnected) return;
+	private intersectionObserverFor(scrollHost: HTMLElement): IntersectionObserver | null {
+		const existing = this.pageIntersectionObservers.get(scrollHost);
+		if (existing) return existing;
+		const win = scrollHost.ownerDocument.defaultView ?? window;
+		const Ctor = win.IntersectionObserver;
+		if (typeof Ctor !== "function") return null;
+		const observer = new Ctor(
+			(entries) => {
+				for (const entry of entries) {
+					const page = entry.target as HTMLElement;
+					if (entry.isIntersecting) this.activatePage(page);
+					else this.deactivatePage(page);
+				}
+			},
+			{ root: scrollHost, rootMargin: "1200px 0px", threshold: 0 }
+		);
+		this.pageIntersectionObservers.set(scrollHost, observer);
+		return observer;
+	}
+
+	private activatePage(page: HTMLElement): void {
+		const registration = this.pageRegistrations.get(page);
+		if (!registration || !page.isConnected) return;
+		const key = pageKey(registration.pdfPath, registration.pageNumber);
+		let overlay = page.querySelector(`canvas.${INK_OVERLAY_CLASS}`) as HTMLCanvasElement | null;
+		if (!overlay) {
+			overlay = page.ownerDocument.createElement("canvas");
+			overlay.className = INK_OVERLAY_CLASS;
+			page.appendChild(overlay);
+		}
+		overlay.setAttribute(INK_KEY_ATTR, key);
+		this.sizeOverlayToPage(overlay, page);
+		this.observeActivePage(page);
+		this.redrawOverlay(overlay);
+	}
+
+	private deactivatePage(page: HTMLElement): void {
+		const resize = this.pageResizeObservers.get(page);
+		if (resize) {
+			resize.disconnect();
+			this.pageResizeObservers.delete(page);
+		}
+		const overlay = page.querySelector(`canvas.${INK_OVERLAY_CLASS}`) as HTMLCanvasElement | null;
+		if (!overlay) return;
+		overlay.width = 0;
+		overlay.height = 0;
+		overlay.remove();
+	}
+
+	private observeActivePage(page: HTMLElement): void {
+		if (this.pageResizeObservers.has(page)) return;
+		const observer = new ResizeObserver(() => {
+			const overlay = page.querySelector(`canvas.${INK_OVERLAY_CLASS}`) as HTMLCanvasElement | null;
+			if (!overlay || !page.isConnected) return;
 			this.sizeOverlayToPage(overlay, page);
 			this.redrawOverlay(overlay);
-		}).observe(page);
+		});
+		observer.observe(page);
+		this.pageResizeObservers.set(page, observer);
 	}
 
 	private sizeOverlayToPage(overlay: HTMLCanvasElement, page: HTMLElement): void {
