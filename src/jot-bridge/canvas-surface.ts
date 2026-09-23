@@ -17,9 +17,31 @@ export function applyBackingStoreSize(canvas: HTMLCanvasElement, cssWidth: numbe
 	if (canvas.height !== h) canvas.height = h;
 }
 export function readCanvasSurface(canvas: HTMLCanvasElement): CanvasSurface {
-	const styleW = Number.parseFloat(canvas.style.width), styleH = Number.parseFloat(canvas.style.height);
-	const width = Number.isFinite(styleW) && styleW > 0 ? styleW : canvas.width;
-	const height = Number.isFinite(styleH) && styleH > 0 ? styleH : canvas.height;
+	// Canvas source surfaces can live beneath Obsidian Canvas transforms.
+	// clientWidth/clientHeight are LOCAL layout units; getBoundingClientRect()
+	// is transformed screen space. Ink rendering must use local units so the
+	// ancestor Canvas zoom is applied exactly once.
+	const styleW =
+		canvas.style.width.endsWith("px") ? Number.parseFloat(canvas.style.width) : Number.NaN;
+	const styleH =
+		canvas.style.height.endsWith("px") ? Number.parseFloat(canvas.style.height) : Number.NaN;
+	const rect = canvas.getBoundingClientRect();
+	const width =
+		canvas.clientWidth > 0
+			? canvas.clientWidth
+			: Number.isFinite(styleW) && styleW > 0
+				? styleW
+				: rect.width > 0
+					? rect.width
+					: canvas.width;
+	const height =
+		canvas.clientHeight > 0
+			? canvas.clientHeight
+			: Number.isFinite(styleH) && styleH > 0
+				? styleH
+				: rect.height > 0
+					? rect.height
+					: canvas.height;
 	const dpr = width > 0 ? canvas.width / width : 1;
 	return { width, height, dpr: dpr > 0 ? dpr : 1 };
 }
