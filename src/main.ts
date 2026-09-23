@@ -2988,9 +2988,37 @@ class CanvasToolbar {
 		for (const inkNode of canvas.nodes.values()) {
 			if (!isInkNode(inkNode)) continue;
 			const attachment = readInkAttachment(inkNode);
-			if (!attachment) continue;
+			const inkEl = inkNode.nodeEl;
+			if (!attachment) {
+				inkEl?.removeClass("canvas-kit-attached-ink");
+				if (inkEl) inkEl.style.zIndex = "";
+				continue;
+			}
+			inkEl?.addClass("canvas-kit-attached-ink");
 			const parent = canvas.nodes.get(attachment.parentId);
-			if (!parent) continue;
+			if (!parent) {
+				if (inkEl) inkEl.style.zIndex = "";
+				continue;
+			}
+
+			// Obsidian raises a selected/focused card above its siblings. Keep the
+			// card-local ink one layer above its parent so handwriting doesn't vanish
+			// behind the selected card, but clear the temporary elevation afterward.
+			const parentEl = parent.nodeEl;
+			if (inkEl && parentEl) {
+				const parentSelected =
+					parentEl.hasClass("is-selected") || parentEl.hasClass("is-focused");
+				if (parentSelected) {
+					const computed = Number.parseInt(
+						(parentEl.ownerDocument.defaultView ?? window).getComputedStyle(parentEl).zIndex,
+						10
+					);
+					inkEl.style.zIndex = String(Number.isFinite(computed) ? computed + 1 : 1001);
+				} else {
+					inkEl.style.zIndex = "";
+				}
+			}
+
 			const parentBox = nodeBox(parent);
 			const inkBox = nodeBox(inkNode);
 			const x = parentBox.x + attachment.offsetX;
