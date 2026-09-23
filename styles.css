@@ -1533,3 +1533,46 @@ body .canvas-node.canvas-pencil-highlight-ink,
 	pointer-events: none;
 	touch-action: none;
 }
+
+
+/* Beta 7: explicit iPad-friendly node move affordance.
+   Body taps can edit/open; this grip always means move. */
+.canvas-node > .canvas-kit-move-handle {
+	position: absolute;
+	top: 6px;
+	left: 50%;
+	transform: translateX(-50%);
+	z-index: 140;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 34px;
+	height: 24px;
+	border-radius: 12px;
+	background: color-mix(in srgb, var(--background-primary) 82%, transparent);
+	border: 1px solid var(--background-modifier-border);
+	box-shadow: var(--shadow-s);
+	color: var(--text-muted);
+	cursor: grab;
+	touch-action: none;
+	user-select: none;
+	-webkit-user-select: none;
+	opacity: 0.72;
+}
+
+.canvas-node > .canvas-kit-move-handle svg {
+	width: 18px;
+	height: 18px;
+	pointer-events: none;
+}
+
+.canvas-node.is-selected > .canvas-kit-move-handle,
+.canvas-node.is-focused > .canvas-kit-move-handle,
+.canvas-node > .canvas-kit-move-handle.is-dragging {
+	opacity: 1;
+	color: var(--text-normal);
+}
+
+.canvas-node > .canvas-kit-move-handle.is-dragging {
+	cursor: grabbing;
+}
