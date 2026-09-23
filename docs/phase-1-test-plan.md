@@ -115,3 +115,13 @@ Canvas Lab may consume/prevent an event only after an active tool/session explic
 - [ ] Close and reopen the Canvas; attached handwriting still follows its card.
 - [ ] Resizing a card does not stretch handwriting; attached ink preserves its own size and local offset.
 - [ ] Moving a card with native Canvas controls eventually re-syncs attached handwriting.
+
+
+## Beta 10 — attached ink selection stacking
+
+- [ ] Attached handwriting remains visible while its parent card is selected.
+- [ ] Attached handwriting remains visible while its parent card is focused/editable.
+- [ ] Deselecting the card does not change ink position or appearance.
+- [ ] Attached ink does not intercept taps, selection, editing, or drag-grip gestures.
+- [ ] Moving the card still moves attached handwriting.
+- [ ] Blank-Canvas ink and PDF ink behavior remain unchanged.
