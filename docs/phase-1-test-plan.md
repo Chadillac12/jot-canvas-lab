@@ -93,3 +93,13 @@ Canvas Lab may consume/prevent an event only after an active tool/session explic
 - [ ] Dragging the grip moves a PDF card without scrolling the PDF.
 - [ ] Dragging another card across/over a PDF does not scroll the PDF underneath.
 - [ ] Tapping a card body still performs its normal edit/open behavior.
+
+
+## Beta 8 — iPad drag-grip polish
+
+- [ ] Drag grip is easy to acquire with a finger without precise aiming.
+- [ ] Grip sits partly outside the top edge of the card and remains visible.
+- [ ] Accent-color grip is visually distinct from card content.
+- [ ] Dragging the grip still moves plain notes, PDFs, and image/file cards.
+- [ ] Card body taps still preserve normal edit/open behavior.
+- [ ] PDF ink alignment and resize behavior remain unchanged from beta.7.
