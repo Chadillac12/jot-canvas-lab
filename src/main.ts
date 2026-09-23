@@ -2804,8 +2804,13 @@ class CanvasToolbar {
 		for (const node of canvas.nodes.values()) {
 			const el = node.nodeEl;
 			if (!el) continue;
+			const data = node.getData?.() ?? {};
 			const text = node.text;
-			if (typeof text === "string" && text.startsWith("<svg") && text.includes(INK_MARK)) {
+			const isInk =
+				typeof text === "string" && text.startsWith("<svg") && text.includes(INK_MARK);
+			if (!isInk && data.type !== "group") this.mountMoveHandle(node, el);
+			else this.unmountMoveHandle(el);
+			if (isInk) {
 				el.addClass("canvas-pencil-ink");
 				el.toggleClass(
 					"canvas-pencil-highlight-ink",
@@ -2892,7 +2897,6 @@ class CanvasToolbar {
 				// A plain Obsidian text card. While it's still empty, offer the
 				// [+]/embed affordance so it can become a new/existing note in place;
 				// once it has content (or isn't a text card), drop the affordance.
-				const data = node.getData?.() ?? {};
 				const txt =
 					typeof node.text === "string"
 						? node.text
@@ -2910,6 +2914,97 @@ class CanvasToolbar {
 		// While a table is selected, CSS nudges Obsidian's floating node menu up
 		// so it doesn't cover the column-reorder handles above the table edge.
 		canvas.wrapperEl.toggleClass("canvas-kit-table-selected", tableSelected);
+	}
+
+	private mountMoveHandle(node: CanvasNodeLike, el: HTMLElement) {
+		if (el.querySelector(":scope > .canvas-kit-move-handle")) return;
+		const handle = el.createDiv({
+			cls: "canvas-kit-move-handle",
+			attr: { "aria-label": "Drag card" },
+		});
+		setIcon(handle, "grip-horizontal");
+
+		let pointerId: number | null = null;
+		let startWorld: { x: number; y: number } | null = null;
+		let original: { x: number; y: number; width: number; height: number } | null = null;
+		let moved = false;
+
+		const worldAt = (e: PointerEvent) => {
+			const canvas = this.view.canvas;
+			return canvas?.posFromEvt?.({ clientX: e.clientX, clientY: e.clientY }) ?? {
+				x: e.clientX,
+				y: e.clientY,
+			};
+		};
+
+		const finish = (e: PointerEvent) => {
+			if (pointerId === null || e.pointerId !== pointerId) return;
+			pointerId = null;
+			startWorld = null;
+			original = null;
+			handle.removeClass("is-dragging");
+			if (moved) {
+				this.view.canvas?.requestSave?.();
+				this.view.canvas?.requestPushHistory?.run?.();
+			}
+			moved = false;
+			e.preventDefault();
+			e.stopPropagation();
+		};
+
+		handle.addEventListener("pointerdown", (e) => {
+			if (e.button !== 0 || pointerId !== null) return;
+			const data = node.getData?.() ?? {};
+			const width = Number(data.width) || node.width || 0;
+			const height = Number(data.height) || node.height || 0;
+			pointerId = e.pointerId;
+			startWorld = worldAt(e);
+			original = {
+				x: Number(data.x) || node.x || 0,
+				y: Number(data.y) || node.y || 0,
+				width,
+				height,
+			};
+			moved = false;
+			handle.addClass("is-dragging");
+			try {
+				handle.setPointerCapture(e.pointerId);
+			} catch {
+				// iPad can still deliver the lifecycle without capture.
+			}
+			e.preventDefault();
+			e.stopImmediatePropagation();
+		});
+
+		handle.addEventListener("pointermove", (e) => {
+			if (
+				pointerId === null ||
+				e.pointerId !== pointerId ||
+				!startWorld ||
+				!original
+			) {
+				return;
+			}
+			const now = worldAt(e);
+			const dx = now.x - startWorld.x;
+			const dy = now.y - startWorld.y;
+			if (Math.abs(dx) + Math.abs(dy) > 0.5) moved = true;
+			node.moveAndResize?.({
+				x: original.x + dx,
+				y: original.y + dy,
+				width: original.width,
+				height: original.height,
+			});
+			e.preventDefault();
+			e.stopImmediatePropagation();
+		});
+
+		handle.addEventListener("pointerup", finish);
+		handle.addEventListener("pointercancel", finish);
+	}
+
+	private unmountMoveHandle(el: HTMLElement) {
+		el.querySelector(":scope > .canvas-kit-move-handle")?.remove();
 	}
 
 	/** Snap an ink node's box back to its drawing's aspect ratio after a resize. */
