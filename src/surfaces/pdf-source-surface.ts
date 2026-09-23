@@ -415,10 +415,25 @@ export class PdfSourceSurfaceManager {
 	private sizeOverlayToPage(overlay: HTMLCanvasElement, page: HTMLElement): void {
 		const rect = page.getBoundingClientRect();
 		if (rect.width <= 0 || rect.height <= 0) return;
-		const dpr = safeBackingStoreDpr(rect.width, rect.height, devicePixelRatioFor(window));
-		applyBackingStoreSize(overlay, rect.width, rect.height, dpr);
-		overlay.style.width = `${rect.width}px`;
-		overlay.style.height = `${rect.height}px`;
+
+		// Obsidian Canvas zoom transforms the entire node. Keep the overlay's CSS
+		// box in PAGE-LOCAL coordinates and only use the transformed rect to choose
+		// backing-store density. Using rect.width as CSS width double-applies the
+		// Canvas zoom and visibly shifts ink away from the Pencil.
+		const localWidth = page.clientWidth || page.offsetWidth || rect.width;
+		const localHeight = page.clientHeight || page.offsetHeight || rect.height;
+		if (localWidth <= 0 || localHeight <= 0) return;
+
+		const visualScaleX = rect.width / localWidth;
+		const visualScaleY = rect.height / localHeight;
+		const visualScale = Math.max(0.1, Math.max(visualScaleX, visualScaleY));
+		const win = page.ownerDocument.defaultView ?? window;
+		const requestedDpr = devicePixelRatioFor(win) * visualScale;
+		const dpr = safeBackingStoreDpr(localWidth, localHeight, requestedDpr);
+
+		applyBackingStoreSize(overlay, localWidth, localHeight, dpr);
+		overlay.style.width = "100%";
+		overlay.style.height = "100%";
 	}
 
 	private previewStroke(session: InkSession): JotStroke {
