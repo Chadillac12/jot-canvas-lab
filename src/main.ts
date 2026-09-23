@@ -2917,6 +2917,7 @@ class CanvasToolbar {
 	}
 
 	private mountMoveHandle(node: CanvasNodeLike, el: HTMLElement) {
+		el.addClass("canvas-kit-has-move-handle");
 		if (el.querySelector(":scope > .canvas-kit-move-handle")) return;
 		const handle = el.createDiv({
 			cls: "canvas-kit-move-handle",
@@ -3004,6 +3005,7 @@ class CanvasToolbar {
 	}
 
 	private unmountMoveHandle(el: HTMLElement) {
+		el.removeClass("canvas-kit-has-move-handle");
 		el.querySelector(":scope > .canvas-kit-move-handle")?.remove();
 	}
 
