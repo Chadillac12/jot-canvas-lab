@@ -705,6 +705,70 @@ function isInkNode(node: CanvasNodeLike): boolean {
 	return typeof t === "string" && t.startsWith("<svg") && t.includes(INK_MARK);
 }
 
+interface InkAttachment {
+	parentId: string;
+	offsetX: number;
+	offsetY: number;
+}
+
+const INK_ATTACHMENT_KEY = "canvasKitAttachment";
+
+function nodeBox(node: CanvasNodeLike): { x: number; y: number; width: number; height: number } {
+	const data = node.getData?.() ?? {};
+	const numberOr = (value: unknown, fallback: number | undefined) => {
+		const n = Number(value);
+		return Number.isFinite(n) ? n : (fallback ?? 0);
+	};
+	return {
+		x: numberOr(data.x, node.x),
+		y: numberOr(data.y, node.y),
+		width: numberOr(data.width, node.width),
+		height: numberOr(data.height, node.height),
+	};
+}
+
+function readInkAttachment(node: CanvasNodeLike): InkAttachment | null {
+	const candidates = [node.getData?.(), node.unknownData];
+	for (const data of candidates) {
+		const raw = data?.[INK_ATTACHMENT_KEY];
+		if (!raw || typeof raw !== "object") continue;
+		const value = raw as Record<string, unknown>;
+		const parentId = typeof value.parentId === "string" ? value.parentId : "";
+		const offsetX = Number(value.offsetX);
+		const offsetY = Number(value.offsetY);
+		if (parentId && Number.isFinite(offsetX) && Number.isFinite(offsetY)) {
+			return { parentId, offsetX, offsetY };
+		}
+	}
+	return null;
+}
+
+function findInkAttachmentTarget(
+	canvas: CanvasLike,
+	point: { x: number; y: number }
+): { id: string; node: CanvasNodeLike } | null {
+	const hits: Array<{ id: string; node: CanvasNodeLike; area: number }> = [];
+	for (const [id, node] of canvas.nodes?.entries() ?? []) {
+		if (isInkNode(node)) continue;
+		const data = node.getData?.() ?? {};
+		if (data.type === "group") continue;
+		// PDF ink has its own page-local Jot persistence and must never be
+		// converted back into ordinary Canvas-attached ink.
+		if (node.nodeEl?.classList.contains("jot-canvas-pdf-source")) continue;
+		const box = nodeBox(node);
+		if (
+			point.x >= box.x &&
+			point.x <= box.x + box.width &&
+			point.y >= box.y &&
+			point.y <= box.y + box.height
+		) {
+			hits.push({ id, node, area: Math.max(1, box.width * box.height) });
+		}
+	}
+	hits.sort((a, b) => a.area - b.area);
+	return hits[0] ?? null;
+}
+
 interface CanvasViewLike extends ItemView {
 	canvas?: CanvasLike;
 }
@@ -2800,6 +2864,7 @@ class CanvasToolbar {
 	refreshNodeStyles() {
 		const canvas = this.view.canvas;
 		if (!canvas?.nodes) return;
+		this.syncAttachedInkNodes();
 		let tableSelected = false;
 		for (const node of canvas.nodes.values()) {
 			const el = node.nodeEl;
@@ -2916,6 +2981,34 @@ class CanvasToolbar {
 		canvas.wrapperEl.toggleClass("canvas-kit-table-selected", tableSelected);
 	}
 
+	private syncAttachedInkNodes(): void {
+		const canvas = this.view.canvas;
+		if (!canvas?.nodes) return;
+		let changed = false;
+		for (const inkNode of canvas.nodes.values()) {
+			if (!isInkNode(inkNode)) continue;
+			const attachment = readInkAttachment(inkNode);
+			if (!attachment) continue;
+			const parent = canvas.nodes.get(attachment.parentId);
+			if (!parent) continue;
+			const parentBox = nodeBox(parent);
+			const inkBox = nodeBox(inkNode);
+			const x = parentBox.x + attachment.offsetX;
+			const y = parentBox.y + attachment.offsetY;
+			if (Math.abs(inkBox.x - x) <= 0.25 && Math.abs(inkBox.y - y) <= 0.25) continue;
+			inkNode.moveAndResize?.({
+				x,
+				y,
+				width: inkBox.width,
+				height: inkBox.height,
+			});
+			changed = true;
+		}
+		// Auto-follow should persist without creating a second user-visible undo
+		// step; the parent's move already owns the history entry.
+		if (changed) canvas.requestSave?.(false);
+	}
+
 	private mountMoveHandle(node: CanvasNodeLike, el: HTMLElement) {
 		el.addClass("canvas-kit-has-move-handle");
 		if (el.querySelector(":scope > .canvas-kit-move-handle")) return;
@@ -2996,6 +3089,7 @@ class CanvasToolbar {
 				width: original.width,
 				height: original.height,
 			});
+			this.syncAttachedInkNodes();
 			e.preventDefault();
 			e.stopImmediatePropagation();
 		});
@@ -5783,6 +5877,36 @@ function commitInkNode(
 		save: true,
 		focus: false,
 	});
+
+	// If this stroke STARTED on a normal card, persist a card-local attachment.
+	// The ink remains a normal Canvas ink node (preserving rendering/undo), but
+	// follows the parent's position instead of being stranded in world space.
+	const firstPoint = sources?.[0]?.worldPts?.[0];
+	const attachmentTarget = firstPoint
+		? findInkAttachmentTarget(canvas, { x: firstPoint[0], y: firstPoint[1] })
+		: null;
+	if (node && attachmentTarget) {
+		const parentBox = nodeBox(attachmentTarget.node);
+		const attachment: InkAttachment = {
+			parentId: attachmentTarget.id,
+			offsetX: ink.box.x - parentBox.x,
+			offsetY: ink.box.y - parentBox.y,
+		};
+		try {
+			const stampAttachment = (d: Record<string, unknown>) => {
+				d[INK_ATTACHMENT_KEY] = attachment;
+			};
+			if (node.unknownData) stampAttachment(node.unknownData);
+			if (node.getData && node.setData) {
+				const d = node.getData();
+				stampAttachment(d);
+				node.setData(d);
+			}
+		} catch (err) {
+			console.warn("Canvas Kit: couldn't attach ink to card", err);
+		}
+	}
+
 	// Keep the RAW point trail alongside the rendered outline — handwriting
 	// recognition needs pen trajectories, which can't be recovered from the SVG.
 	if (node && sources?.length) {
