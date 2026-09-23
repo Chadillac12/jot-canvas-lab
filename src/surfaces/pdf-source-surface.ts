@@ -103,6 +103,8 @@ export class PdfSourceSurfaceManager {
 	private observers = new Map<CanvasSurfaceHost, MutationObserver>();
 	private scheduled = new WeakSet<CanvasSurfaceHost>();
 	private pageResizeObservers = new Map<HTMLElement, ResizeObserver>();
+	private nodeResizeObservers = new Map<HTMLElement, ResizeObserver>();
+	private pendingNodeResize = new WeakSet<HTMLElement>();
 	private pageIntersectionObservers = new Map<HTMLElement, IntersectionObserver>();
 	private pageRegistrations = new WeakMap<HTMLElement, { pdfPath: string; pageNumber: number }>();
 	private ink: JotInkStore;
@@ -133,9 +135,11 @@ export class PdfSourceSurfaceManager {
 	destroy(): void {
 		for (const observer of this.observers.values()) observer.disconnect();
 		for (const observer of this.pageResizeObservers.values()) observer.disconnect();
+		for (const observer of this.nodeResizeObservers.values()) observer.disconnect();
 		for (const observer of this.pageIntersectionObservers.values()) observer.disconnect();
 		this.observers.clear();
 		this.pageResizeObservers.clear();
+		this.nodeResizeObservers.clear();
 		this.pageIntersectionObservers.clear();
 		this.ink.destroy();
 		this.inkSession = null;
@@ -260,6 +264,7 @@ export class PdfSourceSurfaceManager {
 
 		nodeEl.classList.add(SOURCE_CLASS);
 		nodeEl.dataset.jotCanvasSourcePath = pdfPath;
+		this.observePdfNodeResize(nodeEl);
 		if (!this.ink.isLoaded(pdfPath)) {
 			void this.ink.ensureLoaded(pdfPath).then(() => this.scheduleRefresh(canvas));
 		}
@@ -271,6 +276,46 @@ export class PdfSourceSurfaceManager {
 			this.upgradePages(nodeEl, pdfPath, scrollHost);
 		}
 		return true;
+	}
+
+	private observePdfNodeResize(nodeEl: HTMLElement): void {
+		if (this.nodeResizeObservers.has(nodeEl)) return;
+		const observer = new ResizeObserver(() => this.schedulePdfNodeResize(nodeEl));
+		observer.observe(nodeEl);
+		this.nodeResizeObservers.set(nodeEl, observer);
+	}
+
+	private schedulePdfNodeResize(nodeEl: HTMLElement): void {
+		if (this.pendingNodeResize.has(nodeEl)) return;
+		this.pendingNodeResize.add(nodeEl);
+		const win = nodeEl.ownerDocument.defaultView ?? window;
+		win.requestAnimationFrame(() => {
+			this.pendingNodeResize.delete(nodeEl);
+			if (!nodeEl.isConnected) return;
+			this.syncPdfNodeLayout(nodeEl);
+			// Obsidian/PDF.js uses viewport resize notifications to recompute
+			// page-width / auto-scale layouts. Debounced to one notification/frame.
+			win.dispatchEvent(new Event("resize"));
+		});
+	}
+
+	private syncPdfNodeLayout(nodeEl: HTMLElement): void {
+		const selectors = [
+			".canvas-node-container",
+			".canvas-node-content",
+			".file-embed",
+			".internal-embed",
+			".pdf-embed",
+			".pdf-container",
+			".pdf-viewer-container",
+			".pdf-scroll-container",
+		];
+		for (const selector of selectors) {
+			for (const el of nodeEl.querySelectorAll<HTMLElement>(selector)) {
+				el.style.maxWidth = "100%";
+				el.style.minWidth = "0";
+			}
+		}
 	}
 
 	private bindScrollBoundary(scrollHost: HTMLElement): void {

@@ -3220,6 +3220,8 @@ class MarkerOverlay extends ToolOverlay {
 	private tapeEnd: { x: number; y: number } | null = null;
 	private tapePreviewEl: HTMLElement;
 	private resizeObserver: ResizeObserver;
+	private penCaptureUnbind: (() => void) | null = null;
+	private routedPenEvents = new WeakSet<PointerEvent>();
 	/** The object under a finger tap, so it can be SELECTED (tablet only). The
 	 * pen never selects/moves — it always draws. Ink is never a target (so you
 	 * can draw over strokes); a section counts only near its top label strip. */
@@ -3253,6 +3255,7 @@ class MarkerOverlay extends ToolOverlay {
 		this.resizeObserver.observe(this.el);
 		this.resize();
 		this.bind();
+		this.bindPenCapture();
 		this.onModeChange();
 	}
 
@@ -3311,6 +3314,65 @@ class MarkerOverlay extends ToolOverlay {
 	private pdfInkActive = false;
 	private pdfTouchScrollActive = false;
 
+	/**
+	 * iPad/WebKit can target Canvas/PDF internals above the full-screen marker
+	 * canvas. While a drawing tool is active, claim primary Pencil events at the
+	 * Canvas wrapper and re-dispatch them directly to MarkerOverlay. Touch and
+	 * mouse keep their normal routing so Canvas gestures and controls coexist.
+	 */
+	private bindPenCapture() {
+		const wrap = this.tb.view.canvas!.wrapperEl;
+		const win = wrap.ownerDocument.defaultView ?? window;
+		const uiSelector =
+			".canvas-pencil-bar, .canvas-pencil-subbar, .canvas-pencil-size-popup, " +
+			".canvas-pencil-card-actions, .canvas-pencil-card-search, .canvas-menu, " +
+			".canvas-controls, .canvas-card-menu, .canvas-kit-search-panel, .cp-table-root";
+
+		const route = (e: PointerEvent) => {
+			if (this.routedPenEvents.has(e)) return;
+			if (e.pointerType !== "pen" || !e.isPrimary) return;
+			const target = e.target as HTMLElement | null;
+			if (target?.closest(uiSelector)) return;
+
+			const routed = new PointerEvent(e.type, {
+				bubbles: true,
+				cancelable: true,
+				composed: true,
+				view: win,
+				pointerId: e.pointerId,
+				pointerType: "pen",
+				isPrimary: e.isPrimary,
+				button: e.button,
+				buttons: e.buttons,
+				clientX: e.clientX,
+				clientY: e.clientY,
+				screenX: e.screenX,
+				screenY: e.screenY,
+				width: e.width,
+				height: e.height,
+				pressure: e.pressure,
+				tangentialPressure: e.tangentialPressure,
+				tiltX: e.tiltX,
+				tiltY: e.tiltY,
+				twist: e.twist,
+				ctrlKey: e.ctrlKey,
+				shiftKey: e.shiftKey,
+				altKey: e.altKey,
+				metaKey: e.metaKey,
+			});
+			this.routedPenEvents.add(routed);
+			e.preventDefault();
+			e.stopImmediatePropagation();
+			this.canvasEl.dispatchEvent(routed);
+		};
+
+		const types = ["pointerdown", "pointermove", "pointerup", "pointercancel"] as const;
+		for (const type of types) wrap.addEventListener(type, route, true);
+		this.penCaptureUnbind = () => {
+			for (const type of types) wrap.removeEventListener(type, route, true);
+		};
+	}
+
 	private bind() {
 		const el = this.canvasEl;
 		el.addEventListener("pointerdown", (e) => {
@@ -3324,20 +3386,32 @@ class MarkerOverlay extends ToolOverlay {
 				return;
 			}
 			if (e.pointerType === "touch" && this.tb.plugin.beginPdfTouchScroll(this.canvas, e)) {
+				try {
 				el.setPointerCapture(e.pointerId);
+			} catch {
+				// Routed Pencil events are synthetic; wrapper capture still owns the lifecycle.
+			}
 				this.activePointer = e.pointerId;
 				this.pdfTouchScrollActive = true;
 				e.preventDefault();
 				return;
 			}
 			if (e.pointerType !== "touch" && this.tb.markerMode !== "tape" && this.tb.plugin.beginPdfInk(this.canvas, e, this.tb)) {
+				try {
 				el.setPointerCapture(e.pointerId);
+			} catch {
+				// Routed Pencil events are synthetic; wrapper capture still owns the lifecycle.
+			}
 				this.activePointer = e.pointerId;
 				this.pdfInkActive = true;
 				e.preventDefault();
 				return;
 			}
-			el.setPointerCapture(e.pointerId);
+			try {
+				el.setPointerCapture(e.pointerId);
+			} catch {
+				// Routed Pencil events are synthetic; wrapper capture still owns the lifecycle.
+			}
 			this.activePointer = e.pointerId;
 			const w = this.worldFromClient(e.clientX, e.clientY);
 			// Apple-Pencil-only: a finger never draws or moves things — it pans on
@@ -3714,6 +3788,8 @@ class MarkerOverlay extends ToolOverlay {
 
 	protected onDestroy() {
 		this.clearHold();
+		this.penCaptureUnbind?.();
+		this.penCaptureUnbind = null;
 		this.resizeObserver.disconnect();
 	}
 }

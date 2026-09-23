@@ -56,3 +56,15 @@ This is a blocking gate before deeper Jot-core integration.
 
 **Do not stop native Canvas pointer propagation merely because the event happened inside a PDF card.**
 Canvas Lab may consume/prevent an event only after an active tool/session explicitly claims that interaction.
+
+
+## Beta 5 — Pencil capture + PDF card resize
+
+- [ ] Marker draws on empty Canvas space with Apple Pencil.
+- [ ] Highlighter draws on empty Canvas space with Apple Pencil.
+- [ ] Tape and eraser still receive Pencil input.
+- [ ] Pencil over an embedded PDF routes into Jot PDF ink.
+- [ ] Switching to Select releases Pencil capture and native Canvas manipulation still works.
+- [ ] Resizing a PDF Canvas node changes the embedded PDF viewport width and height, not just the outer card frame.
+- [ ] PDF internal scrolling still works after repeated node resize.
+- [ ] Canvas pan/zoom still works.

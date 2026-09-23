@@ -431,6 +431,7 @@ body .canvas-node.canvas-pencil-has-actions {
 .canvas-pencil-overlay-marker canvas {
 	position: absolute;
 	inset: 0;
+	pointer-events: auto;
 	cursor: inherit; /* show the tool-icon cursor set on the canvas wrapper */
 }
 
@@ -1444,6 +1445,15 @@ body .canvas-node.canvas-pencil-highlight-ink,
  * viewer to own scrolling inside that frame. Obsidian has used both
  * .pdf-viewer-container and .pdf-scroll-container across PDF viewer revisions.
  */
+.canvas-node.jot-canvas-pdf-source .canvas-node-container,
+.canvas-node.jot-canvas-pdf-source .canvas-node-content {
+	width: 100%;
+	height: 100%;
+	min-width: 0;
+	min-height: 0;
+	box-sizing: border-box;
+}
+
 .canvas-node.jot-canvas-pdf-source .canvas-node-content {
 	overflow: hidden;
 }
@@ -1452,15 +1462,21 @@ body .canvas-node.canvas-pencil-highlight-ink,
 .canvas-node.jot-canvas-pdf-source .file-embed,
 .canvas-node.jot-canvas-pdf-source .internal-embed,
 .canvas-node.jot-canvas-pdf-source .pdf-embed {
+	width: 100%;
 	height: 100%;
+	min-width: 0;
 	min-height: 0;
+	max-width: 100%;
 }
 
 .canvas-node.jot-canvas-pdf-source .pdf-container {
 	display: flex;
 	flex-direction: column;
+	width: 100%;
 	height: 100%;
+	min-width: 0;
 	min-height: 0;
+	max-width: 100%;
 }
 
 .canvas-node.jot-canvas-pdf-source .pdf-toolbar {
@@ -1470,6 +1486,9 @@ body .canvas-node.canvas-pencil-highlight-ink,
 .canvas-node.jot-canvas-pdf-source .pdf-viewer-container,
 .canvas-node.jot-canvas-pdf-source .pdf-scroll-container {
 	flex: 1 1 auto;
+	width: 100% !important;
+	min-width: 0;
+	max-width: 100%;
 }
 
 .canvas-node.jot-canvas-pdf-source .jot-canvas-pdf-scroll-host,
