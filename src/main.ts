@@ -29,6 +29,7 @@ interface CanvasPencilSettings {
 	brushMin: number; // smallest brush size (first slider mark)
 	brushMax: number; // biggest brush size (last slider mark)
 	pencilOnlyDraw: boolean; // tablet: only the Apple Pencil draws; finger pans/selects
+	nativeCanvasControlsRestored: boolean; // migration marker: native Canvas add tools were restored in beta.4
 	tapeImageW: number; // natural px width of the stored tape image (0 = legacy square)
 	tapeImageH: number; // natural px height of the stored tape image
 }
@@ -38,13 +39,14 @@ const DEFAULT_SETTINGS: CanvasPencilSettings = {
 	strokeSize: 2, // = mark 1 (first preset)
 	tapeImage: null,
 	textSize: 20,
-	hideBottomBar: true,
+	hideBottomBar: false,
 	toolbarScale: 1.25,
 	inkSmoothing: 0.5,
 	showTableTool: true,
 	brushMin: 2,
 	brushMax: 28,
 	pencilOnlyDraw: true,
+	nativeCanvasControlsRestored: true,
 	tapeImageW: 0,
 	tapeImageH: 0,
 };
@@ -885,7 +887,18 @@ export default class CanvasPencilPlugin extends Plugin {
 	}
 
 	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, (await this.loadData()) as Partial<CanvasPencilSettings>);
+		const stored = ((await this.loadData()) ?? {}) as Partial<CanvasPencilSettings>;
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, stored);
+
+		// beta.4 coexistence migration: Canvas Kit previously hid Obsidian's native
+		// add-card / add-note / media bar by default. Restore it once for existing
+		// lab users so native Canvas creation tools and Canvas Kit can coexist.
+		if (stored.nativeCanvasControlsRestored !== true) {
+			this.settings.hideBottomBar = false;
+			this.settings.nativeCanvasControlsRestored = true;
+			await this.saveData(this.settings);
+		}
+
 		// Migration: 4 was the old default/first preset; the scale now starts at 2.
 		// Anyone still on 4 was on the default, so move them to the new first mark.
 		if (this.settings.strokeSize === 4) this.settings.strokeSize = 2;

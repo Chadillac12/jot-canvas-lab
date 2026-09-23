@@ -35,3 +35,24 @@ Proceed with the native viewer if all of these are true:
 - Canvas does not repeatedly rebuild/reload the PDF surface.
 
 If the native embed only materializes a fixed page, aggressively re-renders, or cannot isolate gestures reliably, keep the source-surface abstraction but replace the renderer with PDF.js before attaching Jot ink.
+
+
+## Beta 4 — interaction ownership / native Canvas coexistence
+
+This is a blocking gate before deeper Jot-core integration.
+
+- [ ] With **Select** active, an embedded PDF card can be selected, moved, resized, and connected like a normal Canvas node.
+- [ ] Obsidian's native bottom Canvas controls (card / note / media) are visible after upgrading from beta.3.
+- [ ] Native Canvas controls can create cards/notes while Jot Canvas Lab remains enabled.
+- [ ] Canvas Kit **Marker / Highlighter / Eraser** still write directly over the Canvas.
+- [ ] Pencil over a PDF while a drawing tool is active writes to the PDF Jot sidecar rather than creating Canvas ink.
+- [ ] Pencil outside a PDF while a drawing tool is active still creates Canvas Kit freehand ink.
+- [ ] One-finger touch over a PDF can scroll the PDF when the drawing tool owns that gesture.
+- [ ] Two-finger Canvas pan/zoom still works with drawing tools active.
+- [ ] Wheel/trackpad scrolling is contained by the PDF only while the PDF can actually scroll; boundary wheel events return to Canvas.
+- [ ] Switching back to Select leaves no full-screen drawing overlay intercepting native Canvas input.
+
+### Ownership rule
+
+**Do not stop native Canvas pointer propagation merely because the event happened inside a PDF card.**
+Canvas Lab may consume/prevent an event only after an active tool/session explicitly claims that interaction.

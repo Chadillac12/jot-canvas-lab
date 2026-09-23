@@ -150,6 +150,7 @@ export class PdfSourceSurfaceManager {
 		return count;
 	}
 
+	/** Claim a pointer only when an active drawing tool actually hits a loaded PDF page. */
 	beginInk(canvas: CanvasSurfaceHost, e: PointerEvent, style: PdfInkStyle): boolean {
 		if (style.mode !== "eraser" && e.pointerType === "touch") return false;
 		const hit = this.findPageHit(canvas, e.clientX, e.clientY);
@@ -198,6 +199,7 @@ export class PdfSourceSurfaceManager {
 		return true;
 	}
 
+	/** Claim one-finger internal PDF scrolling only while the drawing overlay owns the gesture. */
 	beginTouchScroll(canvas: CanvasSurfaceHost, e: PointerEvent): boolean {
 		if (e.pointerType !== "touch") return false;
 		const hit = this.findPdfNodeHit(canvas, e.clientX, e.clientY);
@@ -274,6 +276,11 @@ export class PdfSourceSurfaceManager {
 	private bindScrollBoundary(scrollHost: HTMLElement): void {
 		if (scrollHost.getAttribute(BOUND_ATTR) === "1") return;
 		scrollHost.setAttribute(BOUND_ATTR, "1");
+
+		// Contain wheel scrolling only while the embedded PDF can actually consume
+		// it. Pointer events intentionally remain untouched: native Canvas needs
+		// pointerdown/move/up to select, drag, connect, and operate cards when a
+		// Jot/Canvas Kit drawing overlay has not explicitly claimed the gesture.
 		scrollHost.addEventListener(
 			"wheel",
 			(e) => {
@@ -281,12 +288,6 @@ export class PdfSourceSurfaceManager {
 			},
 			{ capture: false, passive: true }
 		);
-		for (const type of ["pointerdown", "pointermove", "pointerup", "pointercancel"] as const) {
-			scrollHost.addEventListener(type, (e) => e.stopPropagation(), {
-				capture: false,
-				passive: true,
-			});
-		}
 	}
 
 	private upgradePages(nodeEl: HTMLElement, pdfPath: string, scrollHost: HTMLElement): void {
