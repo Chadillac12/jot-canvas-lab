@@ -80,3 +80,16 @@ Canvas Lab may consume/prevent an event only after an active tool/session explic
 - [ ] PDF scrolling still begins normally when the PDF itself is the topmost node under the finger.
 - [ ] Select/card/native Canvas coexistence remains intact.
 - [ ] PDF card resize improvements remain intact.
+
+
+## Beta 7 — PDF ink coordinate space + explicit card move grip
+
+- [ ] PDF marker lands directly beneath the Pencil at multiple Canvas zoom levels.
+- [ ] PDF highlighter lands directly beneath the Pencil at multiple Canvas zoom levels.
+- [ ] PDF ink remains aligned after resizing the PDF card.
+- [ ] PDF ink remains aligned after Canvas pan/zoom.
+- [ ] Every non-group, non-ink card exposes a small grip handle.
+- [ ] Dragging the grip moves a plain note card without entering edit mode.
+- [ ] Dragging the grip moves a PDF card without scrolling the PDF.
+- [ ] Dragging another card across/over a PDF does not scroll the PDF underneath.
+- [ ] Tapping a card body still performs its normal edit/open behavior.
