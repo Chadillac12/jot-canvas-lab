@@ -3481,8 +3481,9 @@ class MarkerOverlay extends ToolOverlay {
 				return;
 			}
 			if (!this.current) return;
-			const events =
-				typeof e.getCoalescedEvents === "function" ? e.getCoalescedEvents() : [e];
+			const coalesced =
+				typeof e.getCoalescedEvents === "function" ? e.getCoalescedEvents() : [];
+			const events = coalesced.length > 0 ? coalesced : [e];
 			for (const ev of events) {
 				const w = this.worldFromClient(ev.clientX, ev.clientY);
 				this.rawPts?.push([w.x, w.y, 0.5]);

@@ -68,3 +68,15 @@ Canvas Lab may consume/prevent an event only after an active tool/session explic
 - [ ] Resizing a PDF Canvas node changes the embedded PDF viewport width and height, not just the outer card frame.
 - [ ] PDF internal scrolling still works after repeated node resize.
 - [ ] Canvas pan/zoom still works.
+
+
+## Beta 6 — routed Pencil move sampling + PDF hit ownership
+
+- [ ] Marker stroke extends continuously after the initial Pencil dot.
+- [ ] Highlighter stroke extends continuously after the initial Pencil dot.
+- [ ] PDF/Jot stroke extends continuously and persists after Pencil-up.
+- [ ] Routed synthetic Pencil moves fall back to the current event when `getCoalescedEvents()` is empty.
+- [ ] A PDF card underneath another Canvas card does not steal a drag/scroll gesture from the top card.
+- [ ] PDF scrolling still begins normally when the PDF itself is the topmost node under the finger.
+- [ ] Select/card/native Canvas coexistence remains intact.
+- [ ] PDF card resize improvements remain intact.

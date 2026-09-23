@@ -179,7 +179,9 @@ export class PdfSourceSurfaceManager {
 		if (!session || session.canvas !== canvas || session.pointerId !== e.pointerId) return false;
 		const page = session.overlay.closest<HTMLElement>(".page");
 		if (!page) return false;
-		const events = typeof e.getCoalescedEvents === "function" ? e.getCoalescedEvents() : [e];
+		const coalesced =
+			typeof e.getCoalescedEvents === "function" ? e.getCoalescedEvents() : [];
+		const events = coalesced.length > 0 ? coalesced : [e];
 		for (const ev of events) {
 			const p = this.normalizedPoint(page, ev);
 			if (session.style.mode === "eraser") this.eraseAt(session, p.x, p.y);
@@ -468,11 +470,22 @@ export class PdfSourceSurfaceManager {
 	}
 
 	private findPdfNodeHit(canvas: CanvasSurfaceHost, x: number, y: number) {
+		const doc = canvas.wrapperEl.ownerDocument;
+		const stack = typeof doc.elementsFromPoint === "function" ? doc.elementsFromPoint(x, y) : [];
+		const topCanvasNode = stack
+			.map((el) => (el as HTMLElement).closest?.(".canvas-node") as HTMLElement | null)
+			.find((el): el is HTMLElement => !!el);
+
 		for (const node of canvas.nodes?.values() ?? []) {
 			const nodeEl = node.nodeEl;
 			const pdfPath = pdfPathForNode(node);
 			if (!nodeEl || !pdfPath) continue;
-			if (containsPoint(nodeEl.getBoundingClientRect(), x, y)) return { nodeEl, pdfPath };
+			if (!containsPoint(nodeEl.getBoundingClientRect(), x, y)) continue;
+			// If another Canvas node is visually above this PDF at the gesture
+			// origin, that node owns the interaction. Do not scroll/ink the PDF
+			// underneath it merely because their rectangles overlap.
+			if (topCanvasNode && topCanvasNode !== nodeEl) continue;
+			return { nodeEl, pdfPath };
 		}
 		return null;
 	}
