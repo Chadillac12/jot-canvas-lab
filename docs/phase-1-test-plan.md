@@ -103,3 +103,15 @@ Canvas Lab may consume/prevent an event only after an active tool/session explic
 - [ ] Dragging the grip still moves plain notes, PDFs, and image/file cards.
 - [ ] Card body taps still preserve normal edit/open behavior.
 - [ ] PDF ink alignment and resize behavior remain unchanged from beta.7.
+
+
+## Beta 9 — card-local handwriting
+
+- [ ] Marker stroke that starts inside a normal card moves with that card.
+- [ ] Highlighter stroke that starts inside a normal card moves with that card.
+- [ ] Marker/highlighter stroke that starts on empty Canvas remains independent world ink.
+- [ ] PDF ink remains page-local and unchanged.
+- [ ] Moving a card with the explicit grip moves attached handwriting live.
+- [ ] Close and reopen the Canvas; attached handwriting still follows its card.
+- [ ] Resizing a card does not stretch handwriting; attached ink preserves its own size and local offset.
+- [ ] Moving a card with native Canvas controls eventually re-syncs attached handwriting.
