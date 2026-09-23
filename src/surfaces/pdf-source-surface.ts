@@ -311,7 +311,7 @@ export class PdfSourceSurfaceManager {
 			".pdf-scroll-container",
 		];
 		for (const selector of selectors) {
-			for (const el of nodeEl.querySelectorAll<HTMLElement>(selector)) {
+			for (const el of Array.from(nodeEl.querySelectorAll<HTMLElement>(selector))) {
 				el.style.maxWidth = "100%";
 				el.style.minWidth = "0";
 			}
