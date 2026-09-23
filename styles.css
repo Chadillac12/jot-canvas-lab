@@ -1586,3 +1586,14 @@ body .canvas-node.canvas-kit-has-move-handle {
 .canvas-node > .canvas-kit-move-handle.is-dragging {
 	cursor: grabbing;
 }
+
+
+/* Beta 10: attached card handwriting is visual-only. The parent card owns
+   selection/editing; ink must never intercept taps while it rides above it. */
+.canvas-node.canvas-pencil-ink.canvas-kit-attached-ink {
+	pointer-events: none;
+}
+
+.canvas-node.canvas-pencil-ink.canvas-kit-attached-ink * {
+	pointer-events: none !important;
+}
