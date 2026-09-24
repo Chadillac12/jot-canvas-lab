@@ -135,3 +135,12 @@ Canvas Lab may consume/prevent an event only after an active tool/session explic
 - [ ] Selecting the parent card after drawing keeps attached ink visible.
 - [ ] PDF ink remains unchanged.
 - [ ] Blank-Canvas ink remains unchanged.
+
+
+## Beta 12 — attached ink visible at rest
+
+- [ ] Card-local handwriting is visible while the parent card is unselected.
+- [ ] Selecting/focusing the parent card does not hide or reveal the handwriting; it stays continuously visible.
+- [ ] Attached handwriting remains pointer-transparent.
+- [ ] Moving the card still moves attached handwriting.
+- [ ] Blank-Canvas ink and PDF ink remain unchanged.
