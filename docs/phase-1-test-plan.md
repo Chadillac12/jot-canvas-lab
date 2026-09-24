@@ -144,3 +144,16 @@ Canvas Lab may consume/prevent an event only after an active tool/session explic
 - [ ] Attached handwriting remains pointer-transparent.
 - [ ] Moving the card still moves attached handwriting.
 - [ ] Blank-Canvas ink and PDF ink remain unchanged.
+
+
+## Beta 13 — PDF page navigator
+
+- [ ] Floating page navigator appears at the bottom-center of each PDF card.
+- [ ] Previous/next buttons are easy to hit with a finger on iPad.
+- [ ] Current page field tracks manual PDF scrolling.
+- [ ] Typing a page number and pressing Enter jumps directly to that page.
+- [ ] Previous/next buttons jump exactly one page.
+- [ ] Page controls remain usable after resizing the PDF card.
+- [ ] PDF drawing/highlighting remain aligned and functional.
+- [ ] Navigator interaction does not start a Pencil stroke.
+- [ ] PDF node exposes current/total page data for future linked-card collapse/expand behavior.
