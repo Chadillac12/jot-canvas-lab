@@ -56,6 +56,23 @@ interface TouchScrollSession {
 	lastY: number;
 }
 
+interface PdfNavigatorState {
+	nodeEl: HTMLElement;
+	pdfPath: string;
+	scrollHost: HTMLElement;
+	navEl: HTMLElement;
+	prevButton: HTMLButtonElement;
+	nextButton: HTMLButtonElement;
+	pageInput: HTMLInputElement;
+	totalEl: HTMLElement;
+	onScroll: () => void;
+	raf: number | null;
+	currentPage: number;
+	totalPages: number;
+}
+
+const PDF_NAV_CLASS = "jot-canvas-pdf-nav";
+
 function asString(value: unknown): string | null {
 	return typeof value === "string" && value.length > 0 ? value : null;
 }
@@ -107,6 +124,7 @@ export class PdfSourceSurfaceManager {
 	private pendingNodeResize = new WeakSet<HTMLElement>();
 	private pageIntersectionObservers = new Map<HTMLElement, IntersectionObserver>();
 	private pageRegistrations = new WeakMap<HTMLElement, { pdfPath: string; pageNumber: number }>();
+	private navigators = new Map<HTMLElement, PdfNavigatorState>();
 	private ink: JotInkStore;
 	private inkSession: InkSession | null = null;
 	private touchSession: TouchScrollSession | null = null;
@@ -130,6 +148,9 @@ export class PdfSourceSurfaceManager {
 		this.observers.get(canvas)?.disconnect();
 		this.observers.delete(canvas);
 		this.cancelInteraction(canvas);
+		for (const nodeEl of Array.from(this.navigators.keys())) {
+			if (canvas.wrapperEl.contains(nodeEl)) this.destroyNavigator(nodeEl);
+		}
 	}
 
 	destroy(): void {
@@ -137,6 +158,7 @@ export class PdfSourceSurfaceManager {
 		for (const observer of this.pageResizeObservers.values()) observer.disconnect();
 		for (const observer of this.nodeResizeObservers.values()) observer.disconnect();
 		for (const observer of this.pageIntersectionObservers.values()) observer.disconnect();
+		for (const nodeEl of Array.from(this.navigators.keys())) this.destroyNavigator(nodeEl);
 		this.observers.clear();
 		this.pageResizeObservers.clear();
 		this.nodeResizeObservers.clear();
@@ -276,8 +298,227 @@ export class PdfSourceSurfaceManager {
 			scrollHost.classList.add(SCROLL_HOST_CLASS);
 			this.bindScrollBoundary(scrollHost);
 			this.upgradePages(nodeEl, pdfPath, scrollHost);
+			this.ensureNavigator(nodeEl, pdfPath, scrollHost);
+		} else {
+			this.destroyNavigator(nodeEl);
 		}
 		return true;
+	}
+
+	private ensureNavigator(
+		nodeEl: HTMLElement,
+		pdfPath: string,
+		scrollHost: HTMLElement
+	): void {
+		const existing = this.navigators.get(nodeEl);
+		if (existing?.scrollHost === scrollHost) {
+			existing.pdfPath = pdfPath;
+			this.updateNavigator(existing);
+			return;
+		}
+		if (existing) this.destroyNavigator(nodeEl);
+
+		const doc = nodeEl.ownerDocument;
+		const navEl = doc.createElement("div");
+		navEl.className = PDF_NAV_CLASS;
+		navEl.setAttribute("role", "group");
+		navEl.setAttribute("aria-label", "PDF page navigation");
+
+		const prevButton = doc.createElement("button");
+		prevButton.type = "button";
+		prevButton.className = "jot-canvas-pdf-nav-button";
+		prevButton.setAttribute("aria-label", "Previous page");
+		prevButton.textContent = "‹";
+
+		const pageInput = doc.createElement("input");
+		pageInput.className = "jot-canvas-pdf-nav-page";
+		pageInput.type = "number";
+		pageInput.inputMode = "numeric";
+		pageInput.min = "1";
+		pageInput.step = "1";
+		pageInput.setAttribute("aria-label", "Current PDF page");
+
+		const totalEl = doc.createElement("span");
+		totalEl.className = "jot-canvas-pdf-nav-total";
+		totalEl.textContent = "/ ?";
+
+		const nextButton = doc.createElement("button");
+		nextButton.type = "button";
+		nextButton.className = "jot-canvas-pdf-nav-button";
+		nextButton.setAttribute("aria-label", "Next page");
+		nextButton.textContent = "›";
+
+		navEl.append(prevButton, pageInput, totalEl, nextButton);
+		nodeEl.appendChild(navEl);
+
+		const state: PdfNavigatorState = {
+			nodeEl,
+			pdfPath,
+			scrollHost,
+			navEl,
+			prevButton,
+			nextButton,
+			pageInput,
+			totalEl,
+			onScroll: () => {},
+			raf: null,
+			currentPage: 1,
+			totalPages: 0,
+		};
+
+		const scheduleUpdate = () => {
+			if (state.raf !== null) return;
+			const win = nodeEl.ownerDocument.defaultView ?? window;
+			state.raf = win.requestAnimationFrame(() => {
+				state.raf = null;
+				if (!nodeEl.isConnected) return;
+				this.updateNavigator(state);
+			});
+		};
+		state.onScroll = scheduleUpdate;
+		scrollHost.addEventListener("scroll", scheduleUpdate, { passive: true });
+
+		const stopPointer = (e: Event) => e.stopPropagation();
+		navEl.addEventListener("pointerdown", stopPointer);
+		navEl.addEventListener("pointerup", stopPointer);
+		navEl.addEventListener("click", stopPointer);
+
+		prevButton.addEventListener("click", (e) => {
+			e.preventDefault();
+			this.jumpToPage(state, state.currentPage - 1);
+		});
+		nextButton.addEventListener("click", (e) => {
+			e.preventDefault();
+			this.jumpToPage(state, state.currentPage + 1);
+		});
+
+		const commitPageInput = () => {
+			const requested = Number.parseInt(pageInput.value, 10);
+			if (Number.isFinite(requested)) this.jumpToPage(state, requested);
+			else this.updateNavigator(state);
+		};
+		pageInput.addEventListener("change", commitPageInput);
+		pageInput.addEventListener("keydown", (e) => {
+			if (e.key !== "Enter") return;
+			e.preventDefault();
+			commitPageInput();
+			pageInput.blur();
+		});
+		pageInput.addEventListener("focus", () => pageInput.select());
+
+		this.navigators.set(nodeEl, state);
+		this.updateNavigator(state);
+	}
+
+	private destroyNavigator(nodeEl: HTMLElement): void {
+		const state = this.navigators.get(nodeEl);
+		if (!state) return;
+		state.scrollHost.removeEventListener("scroll", state.onScroll);
+		if (state.raf !== null) {
+			const win = nodeEl.ownerDocument.defaultView ?? window;
+			win.cancelAnimationFrame(state.raf);
+		}
+		state.navEl.remove();
+		this.navigators.delete(nodeEl);
+	}
+
+	private pdfPages(nodeEl: HTMLElement): Array<{ el: HTMLElement; number: number }> {
+		const pages: Array<{ el: HTMLElement; number: number }> = [];
+		for (const el of Array.from(nodeEl.querySelectorAll<HTMLElement>(".page[data-page-number]"))) {
+			const number = Number.parseInt(el.getAttribute("data-page-number") ?? "", 10);
+			if (Number.isFinite(number)) pages.push({ el, number });
+		}
+		pages.sort((a, b) => a.number - b.number);
+		return pages;
+	}
+
+	private updateNavigator(state: PdfNavigatorState): void {
+		const pages = this.pdfPages(state.nodeEl);
+		if (!pages.length) {
+			state.navEl.classList.add("is-unready");
+			return;
+		}
+		state.navEl.classList.remove("is-unready");
+
+		const hostRect = state.scrollHost.getBoundingClientRect();
+		const hostCenter = (hostRect.top + hostRect.bottom) / 2;
+		let best = pages[0];
+		let bestVisible = -1;
+		let bestDistance = Number.POSITIVE_INFINITY;
+
+		for (const page of pages) {
+			const rect = page.el.getBoundingClientRect();
+			const visible = Math.max(
+				0,
+				Math.min(rect.bottom, hostRect.bottom) - Math.max(rect.top, hostRect.top)
+			);
+			const distance = Math.abs((rect.top + rect.bottom) / 2 - hostCenter);
+			if (
+				visible > bestVisible + 0.5 ||
+				(Math.abs(visible - bestVisible) <= 0.5 && distance < bestDistance)
+			) {
+				best = page;
+				bestVisible = visible;
+				bestDistance = distance;
+			}
+		}
+
+		const totalPages = Math.max(...pages.map((page) => page.number));
+		const previousPage = state.currentPage;
+		state.currentPage = best.number;
+		state.totalPages = totalPages;
+
+		if (state.nodeEl.ownerDocument.activeElement !== state.pageInput) {
+			state.pageInput.value = String(state.currentPage);
+		}
+		state.pageInput.max = String(totalPages);
+		state.totalEl.textContent = `/ ${totalPages}`;
+		state.prevButton.disabled = state.currentPage <= 1;
+		state.nextButton.disabled = state.currentPage >= totalPages;
+		state.nodeEl.dataset.jotCanvasCurrentPage = String(state.currentPage);
+		state.nodeEl.dataset.jotCanvasTotalPages = String(totalPages);
+
+		if (previousPage !== state.currentPage) {
+			const win = state.nodeEl.ownerDocument.defaultView ?? window;
+			state.nodeEl.dispatchEvent(
+				new win.CustomEvent("jot-canvas-pdf-page-change", {
+					bubbles: true,
+					composed: true,
+					detail: {
+						pdfPath: state.pdfPath,
+						page: state.currentPage,
+						totalPages,
+					},
+				})
+			);
+		}
+	}
+
+	private jumpToPage(state: PdfNavigatorState, requestedPage: number): void {
+		const pages = this.pdfPages(state.nodeEl);
+		if (!pages.length) return;
+		const totalPages = Math.max(...pages.map((page) => page.number));
+		const pageNumber = Math.max(1, Math.min(totalPages, Math.round(requestedPage)));
+		const target = pages.find((page) => page.number === pageNumber);
+		if (!target) return;
+
+		const hostRect = state.scrollHost.getBoundingClientRect();
+		const pageRect = target.el.getBoundingClientRect();
+		const visualScale =
+			state.scrollHost.clientHeight > 0
+				? hostRect.height / state.scrollHost.clientHeight
+				: 1;
+		const scale = Number.isFinite(visualScale) && visualScale > 0 ? visualScale : 1;
+		const deltaLocal = (pageRect.top - hostRect.top) / scale;
+		const top = Math.max(0, state.scrollHost.scrollTop + deltaLocal - 8);
+		state.scrollHost.scrollTo({ top, behavior: "smooth" });
+
+		// Update immediately for responsive controls; scroll events will refine
+		// the value while smooth scrolling settles.
+		state.currentPage = pageNumber;
+		state.pageInput.value = String(pageNumber);
+		state.prevButton.disabled = pageNumber <= 1;
+		state.nextButton.disabled = pageNumber >= totalPages;
 	}
 
 	private observePdfNodeResize(nodeEl: HTMLElement): void {
