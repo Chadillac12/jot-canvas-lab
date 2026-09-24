@@ -1,7 +1,7 @@
 {
 	"id": "jot-canvas-lab",
 	"name": "Jot Canvas Lab",
-	"version": "0.0.1-beta.14",
+	"version": "0.0.1-beta.15",
 	"minAppVersion": "1.5.0",
 	"description": "Experimental interactive PDF/source surfaces for Obsidian Canvas, combining Canvas Kit workflows with Jot-style annotation architecture.",
 	"author": "Chadillac12",

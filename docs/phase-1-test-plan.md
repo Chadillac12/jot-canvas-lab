@@ -169,3 +169,14 @@ Canvas Lab may consume/prevent an event only after an active tool/session explic
 - [ ] Typing a page into the native field still works.
 - [ ] Current-page data updates for future page-linked card collapse/expand.
 - [ ] Marker/highlighter and PDF internal scrolling remain functional.
+
+
+## Beta 15 — on-demand PDF ink + fit card
+
+- [ ] Marker begins drawing on the visible PDF page immediately after native page navigation.
+- [ ] Highlighter begins drawing on the visible PDF page immediately after native page navigation.
+- [ ] PDF ink remains aligned after page changes and card resize.
+- [ ] Fit button resizes the Canvas PDF card to the current page aspect ratio.
+- [ ] Fit button removes excess vertical whitespace without changing PDF zoom.
+- [ ] Previous/next native page buttons remain functional.
+- [ ] Card resize remains available after using Fit.

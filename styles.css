@@ -1647,3 +1647,12 @@ body .canvas-node.canvas-kit-has-move-handle {
 .jot-canvas-pdf-native-page-button:disabled {
 	opacity: 0.3;
 }
+
+
+/* Beta 15: fit the Canvas card to the current page without changing PDF zoom. */
+.jot-canvas-pdf-fit-card-button {
+	width: 48px;
+	font-size: 12px;
+	font-weight: 600;
+	letter-spacing: 0.01em;
+}
