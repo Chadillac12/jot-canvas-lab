@@ -56,22 +56,21 @@ interface TouchScrollSession {
 	lastY: number;
 }
 
-interface PdfNavigatorState {
+interface NativePageControlsState {
 	nodeEl: HTMLElement;
 	pdfPath: string;
-	scrollHost: HTMLElement;
-	navEl: HTMLElement;
+	toolbar: HTMLElement;
+	nativeInput: HTMLInputElement;
+	controlsEl: HTMLElement;
 	prevButton: HTMLButtonElement;
 	nextButton: HTMLButtonElement;
-	pageInput: HTMLInputElement;
-	totalEl: HTMLElement;
+	scrollHost: HTMLElement | null;
 	onScroll: () => void;
-	raf: number | null;
-	currentPage: number;
+	lastPage: number;
 	totalPages: number;
 }
 
-const PDF_NAV_CLASS = "jot-canvas-pdf-nav";
+const NATIVE_CONTROLS_CLASS = "jot-canvas-pdf-native-page-controls";
 
 function asString(value: unknown): string | null {
 	return typeof value === "string" && value.length > 0 ? value : null;
@@ -124,7 +123,7 @@ export class PdfSourceSurfaceManager {
 	private pendingNodeResize = new WeakSet<HTMLElement>();
 	private pageIntersectionObservers = new Map<HTMLElement, IntersectionObserver>();
 	private pageRegistrations = new WeakMap<HTMLElement, { pdfPath: string; pageNumber: number }>();
-	private navigators = new Map<HTMLElement, PdfNavigatorState>();
+	private nativePageControls = new Map<HTMLElement, NativePageControlsState>();
 	private ink: JotInkStore;
 	private inkSession: InkSession | null = null;
 	private touchSession: TouchScrollSession | null = null;
@@ -148,8 +147,8 @@ export class PdfSourceSurfaceManager {
 		this.observers.get(canvas)?.disconnect();
 		this.observers.delete(canvas);
 		this.cancelInteraction(canvas);
-		for (const nodeEl of Array.from(this.navigators.keys())) {
-			if (canvas.wrapperEl.contains(nodeEl)) this.destroyNavigator(nodeEl);
+		for (const nodeEl of Array.from(this.nativePageControls.keys())) {
+			if (canvas.wrapperEl.contains(nodeEl)) this.destroyNativePageControls(nodeEl);
 		}
 	}
 
@@ -158,7 +157,9 @@ export class PdfSourceSurfaceManager {
 		for (const observer of this.pageResizeObservers.values()) observer.disconnect();
 		for (const observer of this.nodeResizeObservers.values()) observer.disconnect();
 		for (const observer of this.pageIntersectionObservers.values()) observer.disconnect();
-		for (const nodeEl of Array.from(this.navigators.keys())) this.destroyNavigator(nodeEl);
+		for (const nodeEl of Array.from(this.nativePageControls.keys())) {
+			this.destroyNativePageControls(nodeEl);
+		}
 		this.observers.clear();
 		this.pageResizeObservers.clear();
 		this.nodeResizeObservers.clear();
@@ -298,227 +299,186 @@ export class PdfSourceSurfaceManager {
 			scrollHost.classList.add(SCROLL_HOST_CLASS);
 			this.bindScrollBoundary(scrollHost);
 			this.upgradePages(nodeEl, pdfPath, scrollHost);
-			this.ensureNavigator(nodeEl, pdfPath, scrollHost);
-		} else {
-			this.destroyNavigator(nodeEl);
 		}
+		this.ensureNativePageControls(nodeEl, pdfPath, scrollHost);
 		return true;
 	}
 
-	private ensureNavigator(
+	private ensureNativePageControls(
 		nodeEl: HTMLElement,
 		pdfPath: string,
-		scrollHost: HTMLElement
+		scrollHost: HTMLElement | null
 	): void {
-		const existing = this.navigators.get(nodeEl);
-		if (existing?.scrollHost === scrollHost) {
-			existing.pdfPath = pdfPath;
-			this.updateNavigator(existing);
+		const toolbar = nodeEl.querySelector<HTMLElement>(".pdf-toolbar");
+		const nativeInput =
+			toolbar?.querySelector<HTMLInputElement>('input[type="number"]') ??
+			toolbar?.querySelector<HTMLInputElement>("input");
+		if (!toolbar || !nativeInput) {
+			this.destroyNativePageControls(nodeEl);
 			return;
 		}
-		if (existing) this.destroyNavigator(nodeEl);
+
+		const existing = this.nativePageControls.get(nodeEl);
+		if (
+			existing &&
+			existing.toolbar === toolbar &&
+			existing.nativeInput === nativeInput &&
+			existing.scrollHost === scrollHost
+		) {
+			existing.pdfPath = pdfPath;
+			this.updateNativePageState(existing);
+			return;
+		}
+		if (existing) this.destroyNativePageControls(nodeEl);
+
+		nativeInput.classList.add("jot-canvas-pdf-native-page-input");
 
 		const doc = nodeEl.ownerDocument;
-		const navEl = doc.createElement("div");
-		navEl.className = PDF_NAV_CLASS;
-		navEl.setAttribute("role", "group");
-		navEl.setAttribute("aria-label", "PDF page navigation");
+		const controlsEl = doc.createElement("div");
+		controlsEl.className = NATIVE_CONTROLS_CLASS;
+		controlsEl.setAttribute("role", "group");
+		controlsEl.setAttribute("aria-label", "PDF page navigation");
 
 		const prevButton = doc.createElement("button");
 		prevButton.type = "button";
-		prevButton.className = "jot-canvas-pdf-nav-button";
-		prevButton.setAttribute("aria-label", "Previous page");
+		prevButton.className = "jot-canvas-pdf-native-page-button";
+		prevButton.setAttribute("aria-label", "Previous PDF page");
 		prevButton.textContent = "‹";
-
-		const pageInput = doc.createElement("input");
-		pageInput.className = "jot-canvas-pdf-nav-page";
-		pageInput.type = "number";
-		pageInput.inputMode = "numeric";
-		pageInput.min = "1";
-		pageInput.step = "1";
-		pageInput.setAttribute("aria-label", "Current PDF page");
-
-		const totalEl = doc.createElement("span");
-		totalEl.className = "jot-canvas-pdf-nav-total";
-		totalEl.textContent = "/ ?";
 
 		const nextButton = doc.createElement("button");
 		nextButton.type = "button";
-		nextButton.className = "jot-canvas-pdf-nav-button";
-		nextButton.setAttribute("aria-label", "Next page");
+		nextButton.className = "jot-canvas-pdf-native-page-button";
+		nextButton.setAttribute("aria-label", "Next PDF page");
 		nextButton.textContent = "›";
 
-		navEl.append(prevButton, pageInput, totalEl, nextButton);
-		nodeEl.appendChild(navEl);
+		controlsEl.append(prevButton, nextButton);
+		toolbar.appendChild(controlsEl);
 
-		const state: PdfNavigatorState = {
+		const state: NativePageControlsState = {
 			nodeEl,
 			pdfPath,
-			scrollHost,
-			navEl,
+			toolbar,
+			nativeInput,
+			controlsEl,
 			prevButton,
 			nextButton,
-			pageInput,
-			totalEl,
-			onScroll: () => {},
-			raf: null,
-			currentPage: 1,
-			totalPages: 0,
+			scrollHost,
+			onScroll: () => this.updateNativePageState(state),
+			lastPage: this.readNativePage(nativeInput),
+			totalPages: this.readTotalPages(nodeEl, nativeInput),
 		};
 
-		const scheduleUpdate = () => {
-			if (state.raf !== null) return;
-			const win = nodeEl.ownerDocument.defaultView ?? window;
-			state.raf = win.requestAnimationFrame(() => {
-				state.raf = null;
-				if (!nodeEl.isConnected) return;
-				this.updateNavigator(state);
-			});
+		const stop = (e: Event) => {
+			e.stopPropagation();
 		};
-		state.onScroll = scheduleUpdate;
-		scrollHost.addEventListener("scroll", scheduleUpdate, { passive: true });
-
-		const stopPointer = (e: Event) => e.stopPropagation();
-		navEl.addEventListener("pointerdown", stopPointer);
-		navEl.addEventListener("pointerup", stopPointer);
-		navEl.addEventListener("click", stopPointer);
+		for (const type of ["pointerdown", "pointerup", "click"] as const) {
+			controlsEl.addEventListener(type, stop);
+		}
 
 		prevButton.addEventListener("click", (e) => {
 			e.preventDefault();
-			this.jumpToPage(state, state.currentPage - 1);
+			this.stepNativePage(state, -1);
 		});
 		nextButton.addEventListener("click", (e) => {
 			e.preventDefault();
-			this.jumpToPage(state, state.currentPage + 1);
+			this.stepNativePage(state, 1);
 		});
 
-		const commitPageInput = () => {
-			const requested = Number.parseInt(pageInput.value, 10);
-			if (Number.isFinite(requested)) this.jumpToPage(state, requested);
-			else this.updateNavigator(state);
-		};
-		pageInput.addEventListener("change", commitPageInput);
-		pageInput.addEventListener("keydown", (e) => {
-			if (e.key !== "Enter") return;
-			e.preventDefault();
-			commitPageInput();
-			pageInput.blur();
-		});
-		pageInput.addEventListener("focus", () => pageInput.select());
+		nativeInput.addEventListener("input", state.onScroll);
+		nativeInput.addEventListener("change", state.onScroll);
+		scrollHost?.addEventListener("scroll", state.onScroll, { passive: true });
 
-		this.navigators.set(nodeEl, state);
-		this.updateNavigator(state);
+		this.nativePageControls.set(nodeEl, state);
+		this.updateNativePageState(state);
 	}
 
-	private destroyNavigator(nodeEl: HTMLElement): void {
-		const state = this.navigators.get(nodeEl);
+	private destroyNativePageControls(nodeEl: HTMLElement): void {
+		const state = this.nativePageControls.get(nodeEl);
 		if (!state) return;
-		state.scrollHost.removeEventListener("scroll", state.onScroll);
-		if (state.raf !== null) {
-			const win = nodeEl.ownerDocument.defaultView ?? window;
-			win.cancelAnimationFrame(state.raf);
-		}
-		state.navEl.remove();
-		this.navigators.delete(nodeEl);
+		state.nativeInput.removeEventListener("input", state.onScroll);
+		state.nativeInput.removeEventListener("change", state.onScroll);
+		state.scrollHost?.removeEventListener("scroll", state.onScroll);
+		state.nativeInput.classList.remove("jot-canvas-pdf-native-page-input");
+		state.controlsEl.remove();
+		this.nativePageControls.delete(nodeEl);
 	}
 
-	private pdfPages(nodeEl: HTMLElement): Array<{ el: HTMLElement; number: number }> {
-		const pages: Array<{ el: HTMLElement; number: number }> = [];
-		for (const el of Array.from(nodeEl.querySelectorAll<HTMLElement>(".page[data-page-number]"))) {
-			const number = Number.parseInt(el.getAttribute("data-page-number") ?? "", 10);
-			if (Number.isFinite(number)) pages.push({ el, number });
-		}
-		pages.sort((a, b) => a.number - b.number);
-		return pages;
+	private readNativePage(input: HTMLInputElement): number {
+		const value = Number.parseInt(input.value, 10);
+		return Number.isFinite(value) && value > 0 ? value : 1;
 	}
 
-	private updateNavigator(state: PdfNavigatorState): void {
-		const pages = this.pdfPages(state.nodeEl);
-		if (!pages.length) {
-			state.navEl.classList.add("is-unready");
-			return;
+	private readTotalPages(nodeEl: HTMLElement, input: HTMLInputElement): number {
+		const max = Number.parseInt(input.max, 10);
+		if (Number.isFinite(max) && max > 0) return max;
+		let highest = 0;
+		for (const page of Array.from(
+			nodeEl.querySelectorAll<HTMLElement>(".page[data-page-number]")
+		)) {
+			const n = Number.parseInt(page.getAttribute("data-page-number") ?? "", 10);
+			if (Number.isFinite(n)) highest = Math.max(highest, n);
 		}
-		state.navEl.classList.remove("is-unready");
+		return highest;
+	}
 
-		const hostRect = state.scrollHost.getBoundingClientRect();
-		const hostCenter = (hostRect.top + hostRect.bottom) / 2;
-		let best = pages[0];
-		let bestVisible = -1;
-		let bestDistance = Number.POSITIVE_INFINITY;
-
-		for (const page of pages) {
-			const rect = page.el.getBoundingClientRect();
-			const visible = Math.max(
-				0,
-				Math.min(rect.bottom, hostRect.bottom) - Math.max(rect.top, hostRect.top)
-			);
-			const distance = Math.abs((rect.top + rect.bottom) / 2 - hostCenter);
-			if (
-				visible > bestVisible + 0.5 ||
-				(Math.abs(visible - bestVisible) <= 0.5 && distance < bestDistance)
-			) {
-				best = page;
-				bestVisible = visible;
-				bestDistance = distance;
-			}
-		}
-
-		const totalPages = Math.max(...pages.map((page) => page.number));
-		const previousPage = state.currentPage;
-		state.currentPage = best.number;
+	private updateNativePageState(state: NativePageControlsState): void {
+		if (!state.nodeEl.isConnected || !state.nativeInput.isConnected) return;
+		const page = this.readNativePage(state.nativeInput);
+		const totalPages = this.readTotalPages(state.nodeEl, state.nativeInput);
+		const previous = state.lastPage;
+		state.lastPage = page;
 		state.totalPages = totalPages;
+		state.prevButton.disabled = page <= 1;
+		state.nextButton.disabled = totalPages > 0 && page >= totalPages;
+		state.nodeEl.dataset.jotCanvasCurrentPage = String(page);
+		if (totalPages > 0) state.nodeEl.dataset.jotCanvasTotalPages = String(totalPages);
 
-		if (state.nodeEl.ownerDocument.activeElement !== state.pageInput) {
-			state.pageInput.value = String(state.currentPage);
-		}
-		state.pageInput.max = String(totalPages);
-		state.totalEl.textContent = `/ ${totalPages}`;
-		state.prevButton.disabled = state.currentPage <= 1;
-		state.nextButton.disabled = state.currentPage >= totalPages;
-		state.nodeEl.dataset.jotCanvasCurrentPage = String(state.currentPage);
-		state.nodeEl.dataset.jotCanvasTotalPages = String(totalPages);
-
-		if (previousPage !== state.currentPage) {
+		if (page !== previous) {
 			const win = state.nodeEl.ownerDocument.defaultView ?? window;
 			state.nodeEl.dispatchEvent(
 				new win.CustomEvent("jot-canvas-pdf-page-change", {
 					bubbles: true,
 					composed: true,
-					detail: {
-						pdfPath: state.pdfPath,
-						page: state.currentPage,
-						totalPages,
-					},
+					detail: { pdfPath: state.pdfPath, page, totalPages },
 				})
 			);
 		}
 	}
 
-	private jumpToPage(state: PdfNavigatorState, requestedPage: number): void {
-		const pages = this.pdfPages(state.nodeEl);
-		if (!pages.length) return;
-		const totalPages = Math.max(...pages.map((page) => page.number));
-		const pageNumber = Math.max(1, Math.min(totalPages, Math.round(requestedPage)));
-		const target = pages.find((page) => page.number === pageNumber);
-		if (!target) return;
+	private stepNativePage(state: NativePageControlsState, delta: number): void {
+		const current = this.readNativePage(state.nativeInput);
+		const total = this.readTotalPages(state.nodeEl, state.nativeInput);
+		const requested = Math.max(1, total > 0 ? Math.min(total, current + delta) : current + delta);
+		this.commitNativePage(state, requested);
+	}
 
-		const hostRect = state.scrollHost.getBoundingClientRect();
-		const pageRect = target.el.getBoundingClientRect();
-		const visualScale =
-			state.scrollHost.clientHeight > 0
-				? hostRect.height / state.scrollHost.clientHeight
-				: 1;
-		const scale = Number.isFinite(visualScale) && visualScale > 0 ? visualScale : 1;
-		const deltaLocal = (pageRect.top - hostRect.top) / scale;
-		const top = Math.max(0, state.scrollHost.scrollTop + deltaLocal - 8);
-		state.scrollHost.scrollTo({ top, behavior: "smooth" });
+	private commitNativePage(state: NativePageControlsState, page: number): void {
+		const input = state.nativeInput;
+		const win = state.nodeEl.ownerDocument.defaultView ?? window;
+		const descriptor = Object.getOwnPropertyDescriptor(win.HTMLInputElement.prototype, "value");
+		if (descriptor?.set) descriptor.set.call(input, String(page));
+		else input.value = String(page);
 
-		// Update immediately for responsive controls; scroll events will refine
-		// the value while smooth scrolling settles.
-		state.currentPage = pageNumber;
-		state.pageInput.value = String(pageNumber);
-		state.prevButton.disabled = pageNumber <= 1;
-		state.nextButton.disabled = pageNumber >= totalPages;
+		// Drive the exact control Obsidian/PDF.js already owns instead of
+		// scrolling PDF DOM ourselves. This preserves the viewer's zoom/layout.
+		input.dispatchEvent(new win.Event("input", { bubbles: true, composed: true }));
+		input.dispatchEvent(new win.Event("change", { bubbles: true, composed: true }));
+		const keyboardInit: KeyboardEventInit = {
+			key: "Enter",
+			code: "Enter",
+			bubbles: true,
+			cancelable: true,
+			composed: true,
+		};
+		input.dispatchEvent(new win.KeyboardEvent("keydown", keyboardInit));
+		input.dispatchEvent(new win.KeyboardEvent("keyup", keyboardInit));
+
+		// Update button state immediately. Native scroll/input events will refine
+		// the current page once PDF.js completes its own navigation.
+		state.lastPage = page;
+		state.prevButton.disabled = page <= 1;
+		state.nextButton.disabled = state.totalPages > 0 && page >= state.totalPages;
+		state.nodeEl.dataset.jotCanvasCurrentPage = String(page);
 	}
 
 	private observePdfNodeResize(nodeEl: HTMLElement): void {

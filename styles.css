@@ -1599,80 +1599,51 @@ body .canvas-node.canvas-kit-has-move-handle {
 }
 
 
-/* Beta 13: iPad-friendly PDF page navigator.
-   Large touch targets + direct page entry; later linked-card visibility follows
-   the page-change signal emitted by this navigator. */
-.jot-canvas-pdf-nav {
-	position: absolute;
-	left: 50%;
-	bottom: 12px;
-	transform: translateX(-50%);
-	z-index: 95;
-	display: flex;
-	align-items: center;
-	gap: 6px;
+/* Beta 14: augment the native Obsidian/PDF.js toolbar instead of maintaining
+   a second navigator. This preserves native zoom/page-layout ownership. */
+.canvas-node.jot-canvas-pdf-source .pdf-toolbar {
 	min-height: 48px;
-	padding: 4px 6px;
-	border: 1px solid var(--background-modifier-border);
-	border-radius: 16px;
-	background: color-mix(in srgb, var(--background-primary) 94%, transparent);
-	box-shadow: var(--shadow-l);
-	color: var(--text-normal);
-	touch-action: manipulation;
-	user-select: none;
-	-webkit-user-select: none;
-	pointer-events: auto;
 }
 
-.jot-canvas-pdf-nav.is-unready {
-	display: none;
-}
-
-.jot-canvas-pdf-nav-button {
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	width: 44px;
-	height: 44px;
-	margin: 0;
-	padding: 0;
-	border: 0;
-	border-radius: 12px;
-	background: transparent;
-	color: var(--text-normal);
-	font-size: 30px;
-	line-height: 1;
-	touch-action: manipulation;
-}
-
-.jot-canvas-pdf-nav-button:hover,
-.jot-canvas-pdf-nav-button:active {
-	background: var(--background-modifier-hover);
-}
-
-.jot-canvas-pdf-nav-button:disabled {
-	opacity: 0.32;
-}
-
-.jot-canvas-pdf-nav-page {
-	width: 54px;
-	height: 38px;
-	margin: 0;
-	padding: 0 6px;
-	border: 1px solid var(--background-modifier-border);
-	border-radius: 10px;
-	background: var(--background-primary);
-	color: var(--text-normal);
-	font-size: 16px; /* prevent iOS focus zoom */
-	font-variant-numeric: tabular-nums;
+.canvas-node.jot-canvas-pdf-source .jot-canvas-pdf-native-page-input {
+	min-width: 52px !important;
+	height: 38px !important;
+	font-size: 16px !important; /* avoid iOS focus zoom */
 	text-align: center;
 	touch-action: manipulation;
 }
 
-.jot-canvas-pdf-nav-total {
-	min-width: 34px;
-	font-size: 14px;
-	font-variant-numeric: tabular-nums;
-	color: var(--text-muted);
-	white-space: nowrap;
+.jot-canvas-pdf-native-page-controls {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	margin-left: 4px;
+	flex: 0 0 auto;
+	touch-action: manipulation;
+}
+
+.jot-canvas-pdf-native-page-button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 40px;
+	height: 40px;
+	margin: 0;
+	padding: 0;
+	border: 0;
+	border-radius: 10px;
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+	font-size: 28px;
+	line-height: 1;
+	touch-action: manipulation;
+}
+
+.jot-canvas-pdf-native-page-button:active {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+
+.jot-canvas-pdf-native-page-button:disabled {
+	opacity: 0.3;
 }

@@ -157,3 +157,15 @@ Canvas Lab may consume/prevent an event only after an active tool/session explic
 - [ ] PDF drawing/highlighting remain aligned and functional.
 - [ ] Navigator interaction does not start a Pencil stroke.
 - [ ] PDF node exposes current/total page data for future linked-card collapse/expand behavior.
+
+
+## Beta 14 — native PDF page controls
+
+- [ ] Beta 13 bottom navigator is completely absent.
+- [ ] PDF zoom/layout matches beta 12 again immediately after opening the Canvas.
+- [ ] Native PDF page field is larger and remains editable.
+- [ ] Added previous/next buttons change the page through the native PDF control.
+- [ ] Previous/next do not manually scroll PDF DOM or alter zoom.
+- [ ] Typing a page into the native field still works.
+- [ ] Current-page data updates for future page-linked card collapse/expand.
+- [ ] Marker/highlighter and PDF internal scrolling remain functional.

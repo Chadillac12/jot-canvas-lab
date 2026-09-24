@@ -3541,7 +3541,7 @@ class MarkerOverlay extends ToolOverlay {
 			".canvas-pencil-bar, .canvas-pencil-subbar, .canvas-pencil-size-popup, " +
 			".canvas-pencil-card-actions, .canvas-pencil-card-search, .canvas-menu, " +
 			".canvas-controls, .canvas-card-menu, .canvas-kit-search-panel, .cp-table-root, " +
-			".jot-canvas-pdf-nav";
+			".pdf-toolbar";
 
 		const route = (e: PointerEvent) => {
 			if (this.routedPenEvents.has(e)) return;
