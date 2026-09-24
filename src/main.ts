@@ -3013,7 +3013,7 @@ class CanvasToolbar {
 						(parentEl.ownerDocument.defaultView ?? window).getComputedStyle(parentEl).zIndex,
 						10
 					);
-					inkEl.style.zIndex = String(Number.isFinite(computed) ? computed + 1 : 1001);
+					inkEl.style.zIndex = String(Number.isFinite(computed) ? computed + 1 : 4);
 				} else {
 					inkEl.style.zIndex = "";
 				}
@@ -3626,6 +3626,14 @@ class MarkerOverlay extends ToolOverlay {
 				e.preventDefault();
 				return;
 			}
+
+			// Normal Canvas/card ink: drop any selected card back to its ordinary
+			// stacking layer before the first live Pencil point is rendered.
+			if (e.pointerType === "pen") {
+				this.canvas.deselectAll?.();
+				this.tb.refreshNodeStyles();
+			}
+
 			try {
 				el.setPointerCapture(e.pointerId);
 			} catch {
