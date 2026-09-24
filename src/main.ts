@@ -3001,22 +3001,17 @@ class CanvasToolbar {
 				continue;
 			}
 
-			// Obsidian raises a selected/focused card above its siblings. Keep the
-			// card-local ink one layer above its parent so handwriting doesn't vanish
-			// behind the selected card, but clear the temporary elevation afterward.
+			// Keep card-local ink one visual layer above its parent at ALL times.
+			// A resting Canvas card often reports z-index:auto; in that case use a
+			// small local layer (1), not an extreme global z-index. When Obsidian
+			// raises the selected/focused parent, follow it with parent + 1.
 			const parentEl = parent.nodeEl;
 			if (inkEl && parentEl) {
-				const parentSelected =
-					parentEl.hasClass("is-selected") || parentEl.hasClass("is-focused");
-				if (parentSelected) {
-					const computed = Number.parseInt(
-						(parentEl.ownerDocument.defaultView ?? window).getComputedStyle(parentEl).zIndex,
-						10
-					);
-					inkEl.style.zIndex = String(Number.isFinite(computed) ? computed + 1 : 4);
-				} else {
-					inkEl.style.zIndex = "";
-				}
+				const computed = Number.parseInt(
+					(parentEl.ownerDocument.defaultView ?? window).getComputedStyle(parentEl).zIndex,
+					10
+				);
+				inkEl.style.zIndex = String(Number.isFinite(computed) ? computed + 1 : 1);
 			}
 
 			const parentBox = nodeBox(parent);
