@@ -15,7 +15,12 @@ import {
 
 interface CanvasNodeLike {
 	nodeEl?: HTMLElement;
+	x?: number;
+	y?: number;
+	width?: number;
+	height?: number;
 	getData?: () => Record<string, unknown>;
+	moveAndResize?: (r: { x: number; y: number; width: number; height: number }) => void;
 	unknownData?: Record<string, unknown>;
 }
 
@@ -57,6 +62,7 @@ interface TouchScrollSession {
 }
 
 interface NativePageControlsState {
+	node: CanvasNodeLike;
 	nodeEl: HTMLElement;
 	pdfPath: string;
 	toolbar: HTMLElement;
@@ -64,6 +70,7 @@ interface NativePageControlsState {
 	controlsEl: HTMLElement;
 	prevButton: HTMLButtonElement;
 	nextButton: HTMLButtonElement;
+	fitButton: HTMLButtonElement;
 	scrollHost: HTMLElement | null;
 	onScroll: () => void;
 	lastPage: number;
@@ -300,11 +307,12 @@ export class PdfSourceSurfaceManager {
 			this.bindScrollBoundary(scrollHost);
 			this.upgradePages(nodeEl, pdfPath, scrollHost);
 		}
-		this.ensureNativePageControls(nodeEl, pdfPath, scrollHost);
+		this.ensureNativePageControls(node, nodeEl, pdfPath, scrollHost);
 		return true;
 	}
 
 	private ensureNativePageControls(
+		node: CanvasNodeLike,
 		nodeEl: HTMLElement,
 		pdfPath: string,
 		scrollHost: HTMLElement | null
@@ -325,6 +333,7 @@ export class PdfSourceSurfaceManager {
 			existing.nativeInput === nativeInput &&
 			existing.scrollHost === scrollHost
 		) {
+			existing.node = node;
 			existing.pdfPath = pdfPath;
 			this.updateNativePageState(existing);
 			return;
@@ -351,10 +360,18 @@ export class PdfSourceSurfaceManager {
 		nextButton.setAttribute("aria-label", "Next PDF page");
 		nextButton.textContent = "›";
 
-		controlsEl.append(prevButton, nextButton);
+		const fitButton = doc.createElement("button");
+		fitButton.type = "button";
+		fitButton.className = "jot-canvas-pdf-native-page-button jot-canvas-pdf-fit-card-button";
+		fitButton.setAttribute("aria-label", "Fit PDF card to current page");
+		fitButton.setAttribute("title", "Fit card to page");
+		fitButton.textContent = "Fit";
+
+		controlsEl.append(prevButton, nextButton, fitButton);
 		toolbar.appendChild(controlsEl);
 
 		const state: NativePageControlsState = {
+			node,
 			nodeEl,
 			pdfPath,
 			toolbar,
@@ -362,6 +379,7 @@ export class PdfSourceSurfaceManager {
 			controlsEl,
 			prevButton,
 			nextButton,
+			fitButton,
 			scrollHost,
 			onScroll: () => this.updateNativePageState(state),
 			lastPage: this.readNativePage(nativeInput),
@@ -382,6 +400,10 @@ export class PdfSourceSurfaceManager {
 		nextButton.addEventListener("click", (e) => {
 			e.preventDefault();
 			this.stepNativePage(state, 1);
+		});
+		fitButton.addEventListener("click", (e) => {
+			e.preventDefault();
+			this.fitCardToCurrentPage(state);
 		});
 
 		nativeInput.addEventListener("input", state.onScroll);
@@ -443,6 +465,55 @@ export class PdfSourceSurfaceManager {
 				})
 			);
 		}
+	}
+
+	private fitCardToCurrentPage(state: NativePageControlsState): void {
+		const pageNumber = this.readNativePage(state.nativeInput);
+		const page =
+			state.nodeEl.querySelector<HTMLElement>(`.page[data-page-number="${pageNumber}"]`) ??
+			state.nodeEl.querySelector<HTMLElement>(".page");
+		if (!page || !state.node.moveAndResize) return;
+
+		const pageWidth = page.clientWidth || page.offsetWidth;
+		const pageHeight = page.clientHeight || page.offsetHeight;
+		if (pageWidth <= 0 || pageHeight <= 0) return;
+
+		const data = state.node.getData?.() ?? {};
+		const x = Number(data.x);
+		const y = Number(data.y);
+		const width = Number(data.width);
+		const fallbackX = state.node.x ?? 0;
+		const fallbackY = state.node.y ?? 0;
+		const fallbackWidth = state.node.width ?? 0;
+		const nodeWidth = Number.isFinite(width) && width > 0 ? width : fallbackWidth;
+		if (nodeWidth <= 0) return;
+
+		const nodeLocalWidth = state.nodeEl.clientWidth || pageWidth;
+		const toolbarHeight = state.toolbar.offsetHeight || 0;
+		const chromeHeight = Math.max(
+			0,
+			state.nodeEl.clientHeight -
+				(state.scrollHost?.clientHeight ?? state.nodeEl.clientHeight)
+		);
+		const localChrome = Math.max(toolbarHeight, chromeHeight);
+		const pageLocalWidth = Math.min(pageWidth, nodeLocalWidth);
+		const pageHeightAtNodeWidth =
+			(pageHeight / Math.max(1, pageLocalWidth)) * nodeWidth;
+
+		// Small breathing room prevents the bottom page edge/scrollbar from being
+		// clipped without leaving the large dead zone of an arbitrary card height.
+		const targetHeight = Math.max(
+			120,
+			Math.round(pageHeightAtNodeWidth + localChrome + 12)
+		);
+
+		state.node.moveAndResize({
+			x: Number.isFinite(x) ? x : fallbackX,
+			y: Number.isFinite(y) ? y : fallbackY,
+			width: nodeWidth,
+			height: targetHeight,
+		});
+		this.schedulePdfNodeResize(state.nodeEl);
 	}
 
 	private stepNativePage(state: NativePageControlsState, delta: number): void {
@@ -715,7 +786,23 @@ export class PdfSourceSurfaceManager {
 			const raw = page.getAttribute("data-page-number");
 			const pageNumber = raw ? Number.parseInt(raw, 10) : NaN;
 			if (!Number.isFinite(pageNumber)) continue;
-			const overlay = page.querySelector(`canvas.${INK_OVERLAY_CLASS}`) as HTMLCanvasElement | null;
+
+			// Native PDF page jumps can replace/virtualize page DOM before the
+			// IntersectionObserver has recreated Jot's overlay. Pencil-down is the
+			// authoritative demand signal: register and activate this page now.
+			this.pageRegistrations.set(page, {
+				pdfPath: nodeHit.pdfPath,
+				pageNumber,
+			});
+			let overlay = page.querySelector(
+				`canvas.${INK_OVERLAY_CLASS}`
+			) as HTMLCanvasElement | null;
+			if (!overlay) {
+				this.activatePage(page);
+				overlay = page.querySelector(
+					`canvas.${INK_OVERLAY_CLASS}`
+				) as HTMLCanvasElement | null;
+			}
 			if (!overlay) continue;
 			return { ...nodeHit, page, pageNumber, overlay };
 		}
