@@ -125,3 +125,13 @@ Canvas Lab may consume/prevent an event only after an active tool/session explic
 - [ ] Attached ink does not intercept taps, selection, editing, or drag-grip gestures.
 - [ ] Moving the card still moves attached handwriting.
 - [ ] Blank-Canvas ink and PDF ink behavior remain unchanged.
+
+
+## Beta 11 — restore live card drawing
+
+- [ ] Marker draws visibly on a normal card from the first Pencil movement.
+- [ ] Highlighter draws visibly on a normal card from the first Pencil movement.
+- [ ] Finished card-local ink remains attached and moves with the card.
+- [ ] Selecting the parent card after drawing keeps attached ink visible.
+- [ ] PDF ink remains unchanged.
+- [ ] Blank-Canvas ink remains unchanged.
