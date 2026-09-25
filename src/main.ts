@@ -10,6 +10,10 @@ import {
 	setIcon,
 } from "obsidian";
 import { getStroke } from "perfect-freehand";
+import {
+	PdfSourceSurfaceManager,
+	type PdfInkStyle,
+} from "./surfaces/pdf-source-surface";
 
 // ---------- Settings ----------
 
@@ -25,6 +29,7 @@ interface CanvasPencilSettings {
 	brushMin: number; // smallest brush size (first slider mark)
 	brushMax: number; // biggest brush size (last slider mark)
 	pencilOnlyDraw: boolean; // tablet: only the Apple Pencil draws; finger pans/selects
+	nativeCanvasControlsRestored: boolean; // migration marker: native Canvas add tools were restored in beta.4
 	tapeImageW: number; // natural px width of the stored tape image (0 = legacy square)
 	tapeImageH: number; // natural px height of the stored tape image
 }
@@ -34,13 +39,14 @@ const DEFAULT_SETTINGS: CanvasPencilSettings = {
 	strokeSize: 2, // = mark 1 (first preset)
 	tapeImage: null,
 	textSize: 20,
-	hideBottomBar: true,
+	hideBottomBar: false,
 	toolbarScale: 1.25,
 	inkSmoothing: 0.5,
 	showTableTool: true,
 	brushMin: 2,
 	brushMax: 28,
 	pencilOnlyDraw: true,
+	nativeCanvasControlsRestored: true,
 	tapeImageW: 0,
 	tapeImageH: 0,
 };
@@ -699,6 +705,70 @@ function isInkNode(node: CanvasNodeLike): boolean {
 	return typeof t === "string" && t.startsWith("<svg") && t.includes(INK_MARK);
 }
 
+interface InkAttachment {
+	parentId: string;
+	offsetX: number;
+	offsetY: number;
+}
+
+const INK_ATTACHMENT_KEY = "canvasKitAttachment";
+
+function nodeBox(node: CanvasNodeLike): { x: number; y: number; width: number; height: number } {
+	const data = node.getData?.() ?? {};
+	const numberOr = (value: unknown, fallback: number | undefined) => {
+		const n = Number(value);
+		return Number.isFinite(n) ? n : (fallback ?? 0);
+	};
+	return {
+		x: numberOr(data.x, node.x),
+		y: numberOr(data.y, node.y),
+		width: numberOr(data.width, node.width),
+		height: numberOr(data.height, node.height),
+	};
+}
+
+function readInkAttachment(node: CanvasNodeLike): InkAttachment | null {
+	const candidates = [node.getData?.(), node.unknownData];
+	for (const data of candidates) {
+		const raw = data?.[INK_ATTACHMENT_KEY];
+		if (!raw || typeof raw !== "object") continue;
+		const value = raw as Record<string, unknown>;
+		const parentId = typeof value.parentId === "string" ? value.parentId : "";
+		const offsetX = Number(value.offsetX);
+		const offsetY = Number(value.offsetY);
+		if (parentId && Number.isFinite(offsetX) && Number.isFinite(offsetY)) {
+			return { parentId, offsetX, offsetY };
+		}
+	}
+	return null;
+}
+
+function findInkAttachmentTarget(
+	canvas: CanvasLike,
+	point: { x: number; y: number }
+): { id: string; node: CanvasNodeLike } | null {
+	const hits: Array<{ id: string; node: CanvasNodeLike; area: number }> = [];
+	for (const [id, node] of canvas.nodes?.entries() ?? []) {
+		if (isInkNode(node)) continue;
+		const data = node.getData?.() ?? {};
+		if (data.type === "group") continue;
+		// PDF ink has its own page-local Jot persistence and must never be
+		// converted back into ordinary Canvas-attached ink.
+		if (node.nodeEl?.classList.contains("jot-canvas-pdf-source")) continue;
+		const box = nodeBox(node);
+		if (
+			point.x >= box.x &&
+			point.x <= box.x + box.width &&
+			point.y >= box.y &&
+			point.y <= box.y + box.height
+		) {
+			hits.push({ id, node, area: Math.max(1, box.width * box.height) });
+		}
+	}
+	hits.sort((a, b) => a.area - b.area);
+	return hits[0] ?? null;
+}
+
 interface CanvasViewLike extends ItemView {
 	canvas?: CanvasLike;
 }
@@ -731,9 +801,11 @@ type CardMode = "empty" | "new" | "existing";
 export default class CanvasPencilPlugin extends Plugin {
 	settings: CanvasPencilSettings;
 	private toolbars = new Map<CanvasViewLike, CanvasToolbar>();
+	private pdfSurfaces!: PdfSourceSurfaceManager;
 
 	async onload() {
 		await this.loadSettings();
+		this.pdfSurfaces = new PdfSourceSurfaceManager(this.app.vault.adapter);
 		this.applyBottomBarVisibility();
 		this.addSettingTab(new CanvasPencilSettingTab(this.app, this));
 
@@ -746,6 +818,20 @@ export default class CanvasPencilPlugin extends Plugin {
 				if (!checking) {
 					const tb = this.toolbars.get(view);
 					tb?.setTool(tb.tool === "marker" ? "select" : "marker");
+				}
+				return true;
+			},
+		});
+
+		this.addCommand({
+			id: "refresh-pdf-source-surfaces",
+			name: "Refresh PDF source surfaces on active canvas",
+			checkCallback: (checking) => {
+				const view = this.getActiveCanvasView();
+				if (!view?.canvas) return false;
+				if (!checking) {
+					const count = this.pdfSurfaces.refresh(view.canvas);
+					new Notice(`Jot Canvas Lab: ${count} PDF source surface${count === 1 ? "" : "s"} ready`);
 				}
 				return true;
 			},
@@ -765,6 +851,7 @@ export default class CanvasPencilPlugin extends Plugin {
 	}
 
 	onunload() {
+		this.pdfSurfaces?.destroy();
 		for (const tb of this.toolbars.values()) tb.destroy();
 		this.toolbars.clear();
 		activeDocument.body.removeClass("canvas-kit-hide-bottom-bar");
@@ -790,6 +877,44 @@ export default class CanvasPencilPlugin extends Plugin {
 		return null;
 	}
 
+	/** Route Canvas drawing tools into a PDF source surface when the Pencil lands on one. */
+	beginPdfInk(canvas: CanvasLike, e: PointerEvent, tb: CanvasToolbar): boolean {
+		const style = this.pdfInkStyle(tb);
+		return style ? this.pdfSurfaces.beginInk(canvas, e, style) : false;
+	}
+
+	movePdfInk(canvas: CanvasLike, e: PointerEvent): boolean {
+		return this.pdfSurfaces.moveInk(canvas, e);
+	}
+
+	endPdfInk(canvas: CanvasLike, e: PointerEvent): boolean {
+		return this.pdfSurfaces.endInk(canvas, e);
+	}
+
+	beginPdfTouchScroll(canvas: CanvasLike, e: PointerEvent): boolean {
+		return this.pdfSurfaces.beginTouchScroll(canvas, e);
+	}
+
+	movePdfTouchScroll(canvas: CanvasLike, e: PointerEvent): boolean {
+		return this.pdfSurfaces.moveTouchScroll(canvas, e);
+	}
+
+	endPdfTouchScroll(canvas: CanvasLike, e: PointerEvent): boolean {
+		return this.pdfSurfaces.endTouchScroll(canvas, e);
+	}
+
+	cancelPdfInteraction(canvas: CanvasLike): void {
+		this.pdfSurfaces.cancelInteraction(canvas);
+	}
+
+	private pdfInkStyle(tb: CanvasToolbar): PdfInkStyle | null {
+		const width = Math.max(0.0008, tb.markerSize * 0.00125);
+		if (tb.markerMode === "draw") return { mode: "pen", color: tb.markerColor, width };
+		if (tb.markerMode === "highlight") return { mode: "highlighter", color: tb.highlightColor, width };
+		if (tb.markerMode === "erase") return { mode: "eraser", color: tb.markerColor, width };
+		return null;
+	}
+
 	getActiveCanvasView(): CanvasViewLike | null {
 		const view = this.app.workspace.getActiveViewOfType<CanvasViewLike>(ItemView);
 		if (view && view.getViewType() === "canvas" && view.canvas) return view;
@@ -811,12 +936,14 @@ export default class CanvasPencilPlugin extends Plugin {
 			const view = leaf.view as CanvasViewLike;
 			if (!view.canvas) continue;
 			live.add(view);
+			this.pdfSurfaces.attach(view.canvas);
 			if (!this.toolbars.has(view)) {
 				this.toolbars.set(view, new CanvasToolbar(this, view));
 			}
 		}
 		for (const [view, tb] of this.toolbars) {
 			if (!live.has(view)) {
+				if (view.canvas) this.pdfSurfaces.detach(view.canvas);
 				tb.destroy();
 				this.toolbars.delete(view);
 			}
@@ -824,7 +951,18 @@ export default class CanvasPencilPlugin extends Plugin {
 	}
 
 	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, (await this.loadData()) as Partial<CanvasPencilSettings>);
+		const stored = ((await this.loadData()) ?? {}) as Partial<CanvasPencilSettings>;
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, stored);
+
+		// beta.4 coexistence migration: Canvas Kit previously hid Obsidian's native
+		// add-card / add-note / media bar by default. Restore it once for existing
+		// lab users so native Canvas creation tools and Canvas Kit can coexist.
+		if (stored.nativeCanvasControlsRestored !== true) {
+			this.settings.hideBottomBar = false;
+			this.settings.nativeCanvasControlsRestored = true;
+			await this.saveData(this.settings);
+		}
+
 		// Migration: 4 was the old default/first preset; the scale now starts at 2.
 		// Anyone still on 4 was on the default, so move them to the new first mark.
 		if (this.settings.strokeSize === 4) this.settings.strokeSize = 2;
@@ -2726,12 +2864,18 @@ class CanvasToolbar {
 	refreshNodeStyles() {
 		const canvas = this.view.canvas;
 		if (!canvas?.nodes) return;
+		this.syncAttachedInkNodes();
 		let tableSelected = false;
 		for (const node of canvas.nodes.values()) {
 			const el = node.nodeEl;
 			if (!el) continue;
+			const data = node.getData?.() ?? {};
 			const text = node.text;
-			if (typeof text === "string" && text.startsWith("<svg") && text.includes(INK_MARK)) {
+			const isInk =
+				typeof text === "string" && text.startsWith("<svg") && text.includes(INK_MARK);
+			if (!isInk && data.type !== "group") this.mountMoveHandle(node, el);
+			else this.unmountMoveHandle(el);
+			if (isInk) {
 				el.addClass("canvas-pencil-ink");
 				el.toggleClass(
 					"canvas-pencil-highlight-ink",
@@ -2818,7 +2962,6 @@ class CanvasToolbar {
 				// A plain Obsidian text card. While it's still empty, offer the
 				// [+]/embed affordance so it can become a new/existing note in place;
 				// once it has content (or isn't a text card), drop the affordance.
-				const data = node.getData?.() ?? {};
 				const txt =
 					typeof node.text === "string"
 						? node.text
@@ -2829,13 +2972,170 @@ class CanvasToolbar {
 				// (not permanently on every blank card).
 				const selected = el.hasClass("is-selected") || el.hasClass("is-focused");
 				const emptyCard = data.type === "text" && !txt.trim();
-				if (emptyCard && selected) this.mountCardActions(node, el);
+				const linkedNote =
+					el.hasClass("jot-canvas-linked-note") ||
+					!!data.jotCanvasPdfLink ||
+					!!node.unknownData?.jotCanvasPdfLink;
+				if (emptyCard && selected && !linkedNote) this.mountCardActions(node, el);
 				else this.unmountCardActions(el);
 			}
 		}
 		// While a table is selected, CSS nudges Obsidian's floating node menu up
 		// so it doesn't cover the column-reorder handles above the table edge.
 		canvas.wrapperEl.toggleClass("canvas-kit-table-selected", tableSelected);
+	}
+
+	private syncAttachedInkNodes(): void {
+		const canvas = this.view.canvas;
+		if (!canvas?.nodes) return;
+		let changed = false;
+		for (const inkNode of canvas.nodes.values()) {
+			if (!isInkNode(inkNode)) continue;
+			const attachment = readInkAttachment(inkNode);
+			const inkEl = inkNode.nodeEl;
+			if (!attachment) {
+				inkEl?.removeClass("canvas-kit-attached-ink");
+				if (inkEl) {
+					inkEl.style.zIndex = "";
+					inkEl.style.display = "";
+				}
+				continue;
+			}
+			inkEl?.addClass("canvas-kit-attached-ink");
+			const parent = canvas.nodes.get(attachment.parentId);
+			if (!parent) {
+				if (inkEl) {
+					inkEl.style.zIndex = "";
+					inkEl.style.display = "";
+				}
+				continue;
+			}
+
+			// Keep card-local ink one visual layer above its parent at ALL times.
+			// A resting Canvas card often reports z-index:auto; in that case use a
+			// small local layer (1), not an extreme global z-index. When Obsidian
+			// raises the selected/focused parent, follow it with parent + 1.
+			const parentEl = parent.nodeEl;
+			if (inkEl && parentEl) {
+				const linkedCollapsed = parentEl.hasClass("jot-canvas-linked-note-collapsed");
+				inkEl.style.display = linkedCollapsed ? "none" : "";
+				const computed = Number.parseInt(
+					(parentEl.ownerDocument.defaultView ?? window).getComputedStyle(parentEl).zIndex,
+					10
+				);
+				inkEl.style.zIndex = String(Number.isFinite(computed) ? computed + 1 : 1);
+			}
+
+			const parentBox = nodeBox(parent);
+			const inkBox = nodeBox(inkNode);
+			const x = parentBox.x + attachment.offsetX;
+			const y = parentBox.y + attachment.offsetY;
+			if (Math.abs(inkBox.x - x) <= 0.25 && Math.abs(inkBox.y - y) <= 0.25) continue;
+			inkNode.moveAndResize?.({
+				x,
+				y,
+				width: inkBox.width,
+				height: inkBox.height,
+			});
+			changed = true;
+		}
+		// Auto-follow should persist without creating a second user-visible undo
+		// step; the parent's move already owns the history entry.
+		if (changed) canvas.requestSave?.(false);
+	}
+
+	private mountMoveHandle(node: CanvasNodeLike, el: HTMLElement) {
+		el.addClass("canvas-kit-has-move-handle");
+		if (el.querySelector(":scope > .canvas-kit-move-handle")) return;
+		const handle = el.createDiv({
+			cls: "canvas-kit-move-handle",
+			attr: { "aria-label": "Drag card" },
+		});
+		setIcon(handle, "grip-horizontal");
+
+		let pointerId: number | null = null;
+		let startWorld: { x: number; y: number } | null = null;
+		let original: { x: number; y: number; width: number; height: number } | null = null;
+		let moved = false;
+
+		const worldAt = (e: PointerEvent) => {
+			const canvas = this.view.canvas;
+			return canvas?.posFromEvt?.({ clientX: e.clientX, clientY: e.clientY }) ?? {
+				x: e.clientX,
+				y: e.clientY,
+			};
+		};
+
+		const finish = (e: PointerEvent) => {
+			if (pointerId === null || e.pointerId !== pointerId) return;
+			pointerId = null;
+			startWorld = null;
+			original = null;
+			handle.removeClass("is-dragging");
+			if (moved) {
+				this.view.canvas?.requestSave?.();
+				this.view.canvas?.requestPushHistory?.run?.();
+			}
+			moved = false;
+			e.preventDefault();
+			e.stopPropagation();
+		};
+
+		handle.addEventListener("pointerdown", (e) => {
+			if (e.button !== 0 || pointerId !== null) return;
+			const data = node.getData?.() ?? {};
+			const width = Number(data.width) || node.width || 0;
+			const height = Number(data.height) || node.height || 0;
+			pointerId = e.pointerId;
+			startWorld = worldAt(e);
+			original = {
+				x: Number(data.x) || node.x || 0,
+				y: Number(data.y) || node.y || 0,
+				width,
+				height,
+			};
+			moved = false;
+			handle.addClass("is-dragging");
+			try {
+				handle.setPointerCapture(e.pointerId);
+			} catch {
+				// iPad can still deliver the lifecycle without capture.
+			}
+			e.preventDefault();
+			e.stopImmediatePropagation();
+		});
+
+		handle.addEventListener("pointermove", (e) => {
+			if (
+				pointerId === null ||
+				e.pointerId !== pointerId ||
+				!startWorld ||
+				!original
+			) {
+				return;
+			}
+			const now = worldAt(e);
+			const dx = now.x - startWorld.x;
+			const dy = now.y - startWorld.y;
+			if (Math.abs(dx) + Math.abs(dy) > 0.5) moved = true;
+			node.moveAndResize?.({
+				x: original.x + dx,
+				y: original.y + dy,
+				width: original.width,
+				height: original.height,
+			});
+			this.syncAttachedInkNodes();
+			e.preventDefault();
+			e.stopImmediatePropagation();
+		});
+
+		handle.addEventListener("pointerup", finish);
+		handle.addEventListener("pointercancel", finish);
+	}
+
+	private unmountMoveHandle(el: HTMLElement) {
+		el.removeClass("canvas-kit-has-move-handle");
+		el.querySelector(":scope > .canvas-kit-move-handle")?.remove();
 	}
 
 	/** Snap an ink node's box back to its drawing's aspect ratio after a resize. */
@@ -3146,6 +3446,8 @@ class MarkerOverlay extends ToolOverlay {
 	private tapeEnd: { x: number; y: number } | null = null;
 	private tapePreviewEl: HTMLElement;
 	private resizeObserver: ResizeObserver;
+	private penCaptureUnbind: (() => void) | null = null;
+	private routedPenEvents = new WeakSet<PointerEvent>();
 	/** The object under a finger tap, so it can be SELECTED (tablet only). The
 	 * pen never selects/moves — it always draws. Ink is never a target (so you
 	 * can draw over strokes); a section counts only near its top label strip. */
@@ -3179,6 +3481,7 @@ class MarkerOverlay extends ToolOverlay {
 		this.resizeObserver.observe(this.el);
 		this.resize();
 		this.bind();
+		this.bindPenCapture();
 		this.onModeChange();
 	}
 
@@ -3189,6 +3492,9 @@ class MarkerOverlay extends ToolOverlay {
 
 	/** Second finger landed — this is a pan/zoom, not a stroke. Drop the stroke. */
 	protected onGestureStart() {
+		this.tb.plugin.cancelPdfInteraction(this.canvas);
+		this.pdfInkActive = false;
+		this.pdfTouchScrollActive = false;
 		this.current = null;
 		this.activePointer = null;
 		this.fingerPan = null;
@@ -3231,6 +3537,68 @@ class MarkerOverlay extends ToolOverlay {
 	private fingerPan: { x: number; y: number; sx: number; sy: number } | null = null;
 	/** The object under a finger's press — selected on tap, ignored on pan/drag. */
 	private fingerHit: CanvasNodeLike | null = null;
+	private pdfInkActive = false;
+	private pdfTouchScrollActive = false;
+
+	/**
+	 * iPad/WebKit can target Canvas/PDF internals above the full-screen marker
+	 * canvas. While a drawing tool is active, claim primary Pencil events at the
+	 * Canvas wrapper and re-dispatch them directly to MarkerOverlay. Touch and
+	 * mouse keep their normal routing so Canvas gestures and controls coexist.
+	 */
+	private bindPenCapture() {
+		const wrap = this.tb.view.canvas!.wrapperEl;
+		const win = wrap.ownerDocument.defaultView ?? window;
+		const uiSelector =
+			".canvas-pencil-bar, .canvas-pencil-subbar, .canvas-pencil-size-popup, " +
+			".canvas-pencil-card-actions, .canvas-pencil-card-search, .canvas-menu, " +
+			".canvas-controls, .canvas-card-menu, .canvas-kit-search-panel, .cp-table-root, " +
+			".pdf-toolbar, .jot-canvas-linked-note-header";
+
+		const route = (e: PointerEvent) => {
+			if (this.routedPenEvents.has(e)) return;
+			if (e.pointerType !== "pen" || !e.isPrimary) return;
+			const target = e.target as HTMLElement | null;
+			if (target?.closest(uiSelector)) return;
+
+			const routed = new PointerEvent(e.type, {
+				bubbles: true,
+				cancelable: true,
+				composed: true,
+				view: win,
+				pointerId: e.pointerId,
+				pointerType: "pen",
+				isPrimary: e.isPrimary,
+				button: e.button,
+				buttons: e.buttons,
+				clientX: e.clientX,
+				clientY: e.clientY,
+				screenX: e.screenX,
+				screenY: e.screenY,
+				width: e.width,
+				height: e.height,
+				pressure: e.pressure,
+				tangentialPressure: e.tangentialPressure,
+				tiltX: e.tiltX,
+				tiltY: e.tiltY,
+				twist: e.twist,
+				ctrlKey: e.ctrlKey,
+				shiftKey: e.shiftKey,
+				altKey: e.altKey,
+				metaKey: e.metaKey,
+			});
+			this.routedPenEvents.add(routed);
+			e.preventDefault();
+			e.stopImmediatePropagation();
+			this.canvasEl.dispatchEvent(routed);
+		};
+
+		const types = ["pointerdown", "pointermove", "pointerup", "pointercancel"] as const;
+		for (const type of types) wrap.addEventListener(type, route, true);
+		this.penCaptureUnbind = () => {
+			for (const type of types) wrap.removeEventListener(type, route, true);
+		};
+	}
 
 	private bind() {
 		const el = this.canvasEl;
@@ -3244,7 +3612,41 @@ class MarkerOverlay extends ToolOverlay {
 				this.current = null;
 				return;
 			}
-			el.setPointerCapture(e.pointerId);
+			if (e.pointerType === "touch" && this.tb.plugin.beginPdfTouchScroll(this.canvas, e)) {
+				try {
+				el.setPointerCapture(e.pointerId);
+			} catch {
+				// Routed Pencil events are synthetic; wrapper capture still owns the lifecycle.
+			}
+				this.activePointer = e.pointerId;
+				this.pdfTouchScrollActive = true;
+				e.preventDefault();
+				return;
+			}
+			if (e.pointerType !== "touch" && this.tb.markerMode !== "tape" && this.tb.plugin.beginPdfInk(this.canvas, e, this.tb)) {
+				try {
+				el.setPointerCapture(e.pointerId);
+			} catch {
+				// Routed Pencil events are synthetic; wrapper capture still owns the lifecycle.
+			}
+				this.activePointer = e.pointerId;
+				this.pdfInkActive = true;
+				e.preventDefault();
+				return;
+			}
+
+			// Normal Canvas/card ink: drop any selected card back to its ordinary
+			// stacking layer before the first live Pencil point is rendered.
+			if (e.pointerType === "pen") {
+				this.canvas.deselectAll?.();
+				this.tb.refreshNodeStyles();
+			}
+
+			try {
+				el.setPointerCapture(e.pointerId);
+			} catch {
+				// Routed Pencil events are synthetic; wrapper capture still owns the lifecycle.
+			}
 			this.activePointer = e.pointerId;
 			const w = this.worldFromClient(e.clientX, e.clientY);
 			// Apple-Pencil-only: a finger never draws or moves things — it pans on
@@ -3281,6 +3683,16 @@ class MarkerOverlay extends ToolOverlay {
 		el.addEventListener("pointermove", (e) => {
 			if (this.gesturing()) return;
 			if (this.activePointer !== null && e.pointerId !== this.activePointer) return;
+			if (this.pdfTouchScrollActive) {
+				this.tb.plugin.movePdfTouchScroll(this.canvas, e);
+				e.preventDefault();
+				return;
+			}
+			if (this.pdfInkActive) {
+				this.tb.plugin.movePdfInk(this.canvas, e);
+				e.preventDefault();
+				return;
+			}
 			// Pencil-only finger pan.
 			if (this.fingerPan) {
 				const dx = e.clientX - this.fingerPan.x;
@@ -3304,8 +3716,9 @@ class MarkerOverlay extends ToolOverlay {
 				return;
 			}
 			if (!this.current) return;
-			const events =
-				typeof e.getCoalescedEvents === "function" ? e.getCoalescedEvents() : [e];
+			const coalesced =
+				typeof e.getCoalescedEvents === "function" ? e.getCoalescedEvents() : [];
+			const events = coalesced.length > 0 ? coalesced : [e];
 			for (const ev of events) {
 				const w = this.worldFromClient(ev.clientX, ev.clientY);
 				this.rawPts?.push([w.x, w.y, 0.5]);
@@ -3340,6 +3753,20 @@ class MarkerOverlay extends ToolOverlay {
 			// Only the pointer that started the stroke may end it — a palm lift
 			// mid-stroke must not commit the pen's stroke early.
 			if (this.activePointer !== null && e.pointerId !== this.activePointer) return;
+			if (this.pdfTouchScrollActive) {
+				this.tb.plugin.endPdfTouchScroll(this.canvas, e);
+				this.pdfTouchScrollActive = false;
+				this.activePointer = null;
+				e.preventDefault();
+				return;
+			}
+			if (this.pdfInkActive) {
+				this.tb.plugin.endPdfInk(this.canvas, e);
+				this.pdfInkActive = false;
+				this.activePointer = null;
+				e.preventDefault();
+				return;
+			}
 			this.activePointer = null;
 			if (this.fingerPan) {
 				const fp = this.fingerPan;
@@ -3385,6 +3812,9 @@ class MarkerOverlay extends ToolOverlay {
 		el.addEventListener("contextmenu", (e) => {
 			e.preventDefault();
 			e.stopPropagation();
+			this.tb.plugin.cancelPdfInteraction(this.canvas);
+			this.pdfInkActive = false;
+			this.pdfTouchScrollActive = false;
 			this.activePointer = null;
 			if (this.tapeStart && this.tapeEnd) {
 				const a = this.tapeStart;
@@ -3594,6 +4024,8 @@ class MarkerOverlay extends ToolOverlay {
 
 	protected onDestroy() {
 		this.clearHold();
+		this.penCaptureUnbind?.();
+		this.penCaptureUnbind = null;
 		this.resizeObserver.disconnect();
 	}
 }
@@ -5489,6 +5921,36 @@ function commitInkNode(
 		save: true,
 		focus: false,
 	});
+
+	// If this stroke STARTED on a normal card, persist a card-local attachment.
+	// The ink remains a normal Canvas ink node (preserving rendering/undo), but
+	// follows the parent's position instead of being stranded in world space.
+	const firstPoint = sources?.[0]?.worldPts?.[0];
+	const attachmentTarget = firstPoint
+		? findInkAttachmentTarget(canvas, { x: firstPoint[0], y: firstPoint[1] })
+		: null;
+	if (node && attachmentTarget) {
+		const parentBox = nodeBox(attachmentTarget.node);
+		const attachment: InkAttachment = {
+			parentId: attachmentTarget.id,
+			offsetX: ink.box.x - parentBox.x,
+			offsetY: ink.box.y - parentBox.y,
+		};
+		try {
+			const stampAttachment = (d: Record<string, unknown>) => {
+				d[INK_ATTACHMENT_KEY] = attachment;
+			};
+			if (node.unknownData) stampAttachment(node.unknownData);
+			if (node.getData && node.setData) {
+				const d = node.getData();
+				stampAttachment(d);
+				node.setData(d);
+			}
+		} catch (err) {
+			console.warn("Canvas Kit: couldn't attach ink to card", err);
+		}
+	}
+
 	// Keep the RAW point trail alongside the rendered outline — handwriting
 	// recognition needs pen trajectories, which can't be recovered from the SVG.
 	if (node && sources?.length) {

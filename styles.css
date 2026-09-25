@@ -431,6 +431,7 @@ body .canvas-node.canvas-pencil-has-actions {
 .canvas-pencil-overlay-marker canvas {
 	position: absolute;
 	inset: 0;
+	pointer-events: auto;
 	cursor: inherit; /* show the tool-icon cursor set on the canvas wrapper */
 }
 
@@ -1434,4 +1435,352 @@ body .canvas-node.canvas-pencil-highlight-ink,
 	100% {
 		transform: translateY(0);
 	}
+}
+
+
+/* ---------- Jot Canvas Lab: PDF source surfaces ---------- */
+
+/*
+ * Keep the Canvas node as the spatial frame while allowing the embedded PDF
+ * viewer to own scrolling inside that frame. Obsidian has used both
+ * .pdf-viewer-container and .pdf-scroll-container across PDF viewer revisions.
+ */
+.canvas-node.jot-canvas-pdf-source .canvas-node-container,
+.canvas-node.jot-canvas-pdf-source .canvas-node-content {
+	width: 100%;
+	height: 100%;
+	min-width: 0;
+	min-height: 0;
+	box-sizing: border-box;
+}
+
+.canvas-node.jot-canvas-pdf-source .canvas-node-content {
+	overflow: hidden;
+}
+
+.canvas-node.jot-canvas-pdf-source .canvas-node-content,
+.canvas-node.jot-canvas-pdf-source .file-embed,
+.canvas-node.jot-canvas-pdf-source .internal-embed,
+.canvas-node.jot-canvas-pdf-source .pdf-embed {
+	width: 100%;
+	height: 100%;
+	min-width: 0;
+	min-height: 0;
+	max-width: 100%;
+}
+
+.canvas-node.jot-canvas-pdf-source .pdf-container {
+	display: flex;
+	flex-direction: column;
+	width: 100%;
+	height: 100%;
+	min-width: 0;
+	min-height: 0;
+	max-width: 100%;
+}
+
+.canvas-node.jot-canvas-pdf-source .pdf-toolbar {
+	flex: 0 0 auto;
+}
+
+.canvas-node.jot-canvas-pdf-source .pdf-viewer-container,
+.canvas-node.jot-canvas-pdf-source .pdf-scroll-container {
+	flex: 1 1 auto;
+	width: 100% !important;
+	min-width: 0;
+	max-width: 100%;
+}
+
+.canvas-node.jot-canvas-pdf-source .jot-canvas-pdf-scroll-host,
+.canvas-node.jot-canvas-pdf-source .pdf-viewer-container,
+.canvas-node.jot-canvas-pdf-source .pdf-scroll-container {
+	height: 100% !important;
+	min-height: 0;
+	overflow-y: auto !important;
+	overflow-x: hidden;
+	overscroll-behavior: contain;
+	-webkit-overflow-scrolling: touch;
+	touch-action: pan-y;
+}
+
+/* Tiny lab indicator; intentionally subtle so it does not cover PDF controls. */
+.canvas-node.jot-canvas-pdf-source::after {
+	content: "PDF surface";
+	position: absolute;
+	right: 8px;
+	bottom: 8px;
+	z-index: 8;
+	padding: 2px 6px;
+	border-radius: 999px;
+	background: var(--background-secondary);
+	color: var(--text-muted);
+	font-size: 10px;
+	line-height: 1.4;
+	pointer-events: none;
+	opacity: 0.72;
+}
+
+
+/* Beta 3: Jot-compatible ink with lazy per-page backing stores. */
+.jot-canvas-pdf-page {
+	position: relative !important;
+}
+
+.jot-canvas-pdf-ink {
+	position: absolute;
+	inset: 0;
+	z-index: 50;
+	pointer-events: none;
+	touch-action: none;
+}
+
+
+/* Beta 8: larger, high-contrast iPad move affordance.
+   Body taps can edit/open; this grip always means move. */
+body .canvas-node.canvas-kit-has-move-handle {
+	overflow: visible;
+}
+
+.canvas-node > .canvas-kit-move-handle {
+	position: absolute;
+	top: -18px;
+	left: 50%;
+	transform: translateX(-50%);
+	z-index: 160;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 48px;
+	height: 34px;
+	border-radius: 17px;
+	background: var(--interactive-accent);
+	border: 2px solid var(--background-primary);
+	box-shadow: 0 3px 10px rgba(0, 0, 0, 0.28);
+	color: var(--text-on-accent);
+	cursor: grab;
+	touch-action: none;
+	user-select: none;
+	-webkit-user-select: none;
+	opacity: 0.94;
+}
+
+.canvas-node > .canvas-kit-move-handle svg {
+	width: 22px;
+	height: 22px;
+	pointer-events: none;
+}
+
+.canvas-node.is-selected > .canvas-kit-move-handle,
+.canvas-node.is-focused > .canvas-kit-move-handle,
+.canvas-node > .canvas-kit-move-handle.is-dragging {
+	opacity: 1;
+	background: var(--interactive-accent-hover);
+	color: var(--text-on-accent);
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.34);
+}
+
+.canvas-node > .canvas-kit-move-handle.is-dragging {
+	cursor: grabbing;
+}
+
+.canvas-node > .canvas-kit-move-handle.is-dragging {
+	cursor: grabbing;
+}
+
+
+/* Beta 10: attached card handwriting is visual-only. The parent card owns
+   selection/editing; ink must never intercept taps while it rides above it. */
+.canvas-node.canvas-pencil-ink.canvas-kit-attached-ink {
+	pointer-events: none;
+}
+
+.canvas-node.canvas-pencil-ink.canvas-kit-attached-ink * {
+	pointer-events: none !important;
+}
+
+
+/* Beta 14: augment the native Obsidian/PDF.js toolbar instead of maintaining
+   a second navigator. This preserves native zoom/page-layout ownership. */
+.canvas-node.jot-canvas-pdf-source .pdf-toolbar {
+	min-height: 48px;
+}
+
+.canvas-node.jot-canvas-pdf-source .jot-canvas-pdf-native-page-input {
+	min-width: 52px !important;
+	height: 38px !important;
+	font-size: 16px !important; /* avoid iOS focus zoom */
+	text-align: center;
+	touch-action: manipulation;
+}
+
+.jot-canvas-pdf-native-page-controls {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	margin-left: 4px;
+	flex: 0 0 auto;
+	touch-action: manipulation;
+}
+
+.jot-canvas-pdf-native-page-button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 40px;
+	height: 40px;
+	margin: 0;
+	padding: 0;
+	border: 0;
+	border-radius: 10px;
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+	font-size: 28px;
+	line-height: 1;
+	touch-action: manipulation;
+}
+
+.jot-canvas-pdf-native-page-button:active {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+
+.jot-canvas-pdf-native-page-button:disabled {
+	opacity: 0.3;
+}
+
+
+/* Beta 15: fit the Canvas card to the current page without changing PDF zoom. */
+.jot-canvas-pdf-fit-card-button {
+	width: 48px;
+	font-size: 12px;
+	font-weight: 600;
+	letter-spacing: 0.01em;
+}
+
+
+/* Beta 16: page-linked PDF notes with page-aware compact/expanded states. */
+.jot-canvas-pdf-link-note-button {
+	width: 52px;
+	font-size: 11px;
+	font-weight: 600;
+	letter-spacing: 0.01em;
+}
+
+body .canvas-node.jot-canvas-linked-note {
+	overflow: visible;
+}
+
+.canvas-node.jot-canvas-linked-note > .jot-canvas-linked-note-header {
+	position: absolute;
+	top: -38px;
+	left: 8px;
+	z-index: 155;
+	display: flex;
+	align-items: center;
+	gap: 5px;
+	max-width: calc(100% - 16px);
+	height: 32px;
+	padding: 3px 4px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 12px;
+	background: color-mix(in srgb, var(--background-primary) 94%, transparent);
+	box-shadow: var(--shadow-s);
+	pointer-events: auto;
+	touch-action: manipulation;
+	box-sizing: border-box;
+}
+
+.jot-canvas-linked-note-source,
+.jot-canvas-linked-note-pin {
+	height: 26px;
+	margin: 0;
+	border: 0;
+	border-radius: 9px;
+	background: transparent;
+	color: var(--text-muted);
+	font-size: 11px;
+	line-height: 1;
+	touch-action: manipulation;
+}
+
+.jot-canvas-linked-note-source {
+	flex: 1 1 auto;
+	min-width: 0;
+	padding: 0 8px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	text-align: left;
+}
+
+.jot-canvas-linked-note-source:active,
+.jot-canvas-linked-note-pin:active {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.jot-canvas-linked-note-pin {
+	flex: 0 0 auto;
+	min-width: 40px;
+	padding: 0 7px;
+	font-weight: 600;
+}
+
+.jot-canvas-linked-note-pin.is-pinned {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+
+/* Inactive-page notes collapse to a compact source pill. The Canvas node still
+   exists spatially, so moving/selection/history semantics remain native. */
+.canvas-node.jot-canvas-linked-note-collapsed > .canvas-node-container,
+.canvas-node.jot-canvas-linked-note-collapsed > .canvas-node-content {
+	opacity: 0;
+	pointer-events: none;
+}
+
+.canvas-node.jot-canvas-linked-note-collapsed > .jot-canvas-linked-note-header {
+	inset: 0;
+	width: 100%;
+	max-width: none;
+	height: 100%;
+	padding: 5px 6px;
+	border-radius: 12px;
+	background: color-mix(in srgb, var(--interactive-accent) 18%, var(--background-primary));
+	border-color: color-mix(in srgb, var(--interactive-accent) 55%, var(--background-modifier-border));
+	box-shadow: var(--shadow-s);
+}
+
+.canvas-node.jot-canvas-linked-note-collapsed .jot-canvas-linked-note-source {
+	font-size: 12px;
+	font-weight: 600;
+	color: var(--text-normal);
+}
+
+.canvas-node.jot-canvas-linked-note-collapsed .jot-canvas-linked-note-pin {
+	background: color-mix(in srgb, var(--background-primary) 72%, transparent);
+}
+
+/* Keep the explicit movement grip visible above the collapsed linked-note pill. */
+.canvas-node.jot-canvas-linked-note-collapsed > .canvas-kit-move-handle {
+	z-index: 170;
+}
+
+
+/* Beta 17: linked-note creation polish. Empty linked notes are normal text
+   cards, but they should not look like the generic "choose note/embed" state. */
+.canvas-node.jot-canvas-linked-note.jot-canvas-linked-note-empty:not(.jot-canvas-linked-note-collapsed)
+	.canvas-node-content::after {
+	content: "Tap to type • or use Marker / Highlighter";
+	display: block;
+	padding: 14px;
+	color: var(--text-faint);
+	font-size: 12px;
+	line-height: 1.35;
+	pointer-events: none;
+}
+
+.canvas-node.jot-canvas-linked-note .jot-canvas-linked-note-source::before {
+	content: "↗ ";
+	color: var(--interactive-accent);
 }

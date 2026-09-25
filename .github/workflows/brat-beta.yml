@@ -1,0 +1,57 @@
+name: Publish BRAT beta
+
+on:
+  push:
+    branches:
+      - feature/pdf-source-surface
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check and build
+        run: npm run build
+
+      - name: Read beta version
+        id: version
+        shell: bash
+        run: |
+          version="$(node -p "require('./manifest.json').version")"
+          if [[ "$version" != *-* ]]; then
+            echo "Refusing to publish non-prerelease version: $version" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Publish BRAT prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          assets=(main.js manifest.json styles.css)
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            gh release upload "$VERSION" "${assets[@]}" --clobber
+            gh release edit "$VERSION" --title "$VERSION" --prerelease
+          else
+            gh release create "$VERSION" "${assets[@]}" \
+              --target "$GITHUB_SHA" \
+              --title "$VERSION" \
+              --prerelease \
+              --notes "BRAT test build for the Jot Canvas Lab PDF source-surface prototype."
+          fi
