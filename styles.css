@@ -1765,3 +1765,22 @@ body .canvas-node.jot-canvas-linked-note {
 .canvas-node.jot-canvas-linked-note-collapsed > .canvas-kit-move-handle {
 	z-index: 170;
 }
+
+
+/* Beta 17: linked-note creation polish. Empty linked notes are normal text
+   cards, but they should not look like the generic "choose note/embed" state. */
+.canvas-node.jot-canvas-linked-note.jot-canvas-linked-note-empty:not(.jot-canvas-linked-note-collapsed)
+	.canvas-node-content::after {
+	content: "Tap to type • or use Marker / Highlighter";
+	display: block;
+	padding: 14px;
+	color: var(--text-faint);
+	font-size: 12px;
+	line-height: 1.35;
+	pointer-events: none;
+}
+
+.canvas-node.jot-canvas-linked-note .jot-canvas-linked-note-source::before {
+	content: "↗ ";
+	color: var(--interactive-accent);
+}

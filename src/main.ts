@@ -2972,7 +2972,11 @@ class CanvasToolbar {
 				// (not permanently on every blank card).
 				const selected = el.hasClass("is-selected") || el.hasClass("is-focused");
 				const emptyCard = data.type === "text" && !txt.trim();
-				if (emptyCard && selected) this.mountCardActions(node, el);
+				const linkedNote =
+					el.hasClass("jot-canvas-linked-note") ||
+					!!data.jotCanvasPdfLink ||
+					!!node.unknownData?.jotCanvasPdfLink;
+				if (emptyCard && selected && !linkedNote) this.mountCardActions(node, el);
 				else this.unmountCardActions(el);
 			}
 		}

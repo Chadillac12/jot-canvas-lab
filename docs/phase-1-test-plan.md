@@ -196,3 +196,17 @@ Canvas Lab may consume/prevent an event only after an active tool/session explic
 - [ ] Moving a linked note with the explicit grip still works in both expanded and collapsed states.
 - [ ] Close/reopen Canvas; page linkage, pinned state, expanded size, and jump behavior still work.
 - [ ] PDF marker/highlighter, page navigation, Fit, and normal card-local handwriting remain unchanged.
+
+
+## Beta 17 — linked-note creation stabilization
+
+- [ ] Clicking PDF "Note" produces exactly one linked Canvas text card.
+- [ ] Linked-note metadata exists before the first Canvas save/focus lifecycle.
+- [ ] Newly created linked note does not show the generic empty-card [+]/embed actions.
+- [ ] Empty linked note clearly hints "Tap to type • or use Marker / Highlighter".
+- [ ] Newly created note stays expanded while selected/focused.
+- [ ] Page-aware collapse never occurs underneath an actively edited/selected note.
+- [ ] After interaction moves back to the PDF, changing pages collapses unpinned off-page notes.
+- [ ] Source badge click still jumps to the linked page.
+- [ ] Pin/unpin behavior remains intact.
+- [ ] Linked-card handwriting, PDF ink, Fit, and page controls remain unchanged.

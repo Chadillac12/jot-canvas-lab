@@ -609,8 +609,8 @@ export class PdfSourceSurfaceManager {
 			},
 			size: { width, height },
 			text: "",
-			save: true,
-			focus: true,
+			save: false,
+			focus: false,
 		});
 		if (!created) return;
 
@@ -623,9 +623,13 @@ export class PdfSourceSurfaceManager {
 			expandedWidth: width,
 			expandedHeight: height,
 		};
+
+		// Stamp the relationship BEFORE the first save/focus lifecycle. Beta 16
+		// saved/focused the empty text node first, which let native Canvas editing
+		// and Canvas Kit's empty-card affordance race the linked-note upgrade.
 		this.writeLinkedNote(canvas, created, link);
+		canvas.requestSave?.(false);
 		canvas.selectOnly?.(created);
-		created.startEditing?.();
 		canvas.requestPushHistory?.run?.();
 		this.scheduleRefresh(canvas);
 	}
@@ -660,6 +664,14 @@ export class PdfSourceSurfaceManager {
 		el.classList.add(LINKED_NOTE_CLASS);
 		el.dataset.jotCanvasLinkedPage = String(link.page);
 		el.dataset.jotCanvasLinkedSource = link.sourcePath;
+		const data = node.getData?.() ?? {};
+		const bodyText =
+			typeof node.text === "string"
+				? node.text
+				: typeof data.text === "string"
+					? data.text
+					: "";
+		el.toggleClass("jot-canvas-linked-note-empty", !bodyText.trim());
 		this.ensureLinkedNoteHeader(canvas, nodeId, node, el, link);
 		this.syncLinkedNoteNode(canvas, node, el, link);
 	}
@@ -749,9 +761,15 @@ export class PdfSourceSurfaceManager {
 		link: PdfLinkedNote
 	): void {
 		const source = this.findSourceState(canvas, link);
-		// If the source PDF isn't mounted yet, keep the note expanded rather than
-		// unexpectedly hiding content.
-		const shouldExpand = !source || link.pinned || source.lastPage === link.page;
+		// A note being actively selected/focused must never collapse out from
+		// under the user. Page-aware minimization resumes once interaction moves
+		// back to the PDF/Canvas.
+		const active =
+			el.hasClass("is-selected") ||
+			el.hasClass("is-focused") ||
+			el.contains(el.ownerDocument.activeElement);
+		const shouldExpand =
+			active || !source || link.pinned || source.lastPage === link.page;
 		const box = nodeBox(node);
 
 		if (shouldExpand) {
