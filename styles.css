@@ -1656,3 +1656,112 @@ body .canvas-node.canvas-kit-has-move-handle {
 	font-weight: 600;
 	letter-spacing: 0.01em;
 }
+
+
+/* Beta 16: page-linked PDF notes with page-aware compact/expanded states. */
+.jot-canvas-pdf-link-note-button {
+	width: 52px;
+	font-size: 11px;
+	font-weight: 600;
+	letter-spacing: 0.01em;
+}
+
+body .canvas-node.jot-canvas-linked-note {
+	overflow: visible;
+}
+
+.canvas-node.jot-canvas-linked-note > .jot-canvas-linked-note-header {
+	position: absolute;
+	top: -38px;
+	left: 8px;
+	z-index: 155;
+	display: flex;
+	align-items: center;
+	gap: 5px;
+	max-width: calc(100% - 16px);
+	height: 32px;
+	padding: 3px 4px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 12px;
+	background: color-mix(in srgb, var(--background-primary) 94%, transparent);
+	box-shadow: var(--shadow-s);
+	pointer-events: auto;
+	touch-action: manipulation;
+	box-sizing: border-box;
+}
+
+.jot-canvas-linked-note-source,
+.jot-canvas-linked-note-pin {
+	height: 26px;
+	margin: 0;
+	border: 0;
+	border-radius: 9px;
+	background: transparent;
+	color: var(--text-muted);
+	font-size: 11px;
+	line-height: 1;
+	touch-action: manipulation;
+}
+
+.jot-canvas-linked-note-source {
+	flex: 1 1 auto;
+	min-width: 0;
+	padding: 0 8px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	text-align: left;
+}
+
+.jot-canvas-linked-note-source:active,
+.jot-canvas-linked-note-pin:active {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.jot-canvas-linked-note-pin {
+	flex: 0 0 auto;
+	min-width: 40px;
+	padding: 0 7px;
+	font-weight: 600;
+}
+
+.jot-canvas-linked-note-pin.is-pinned {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+
+/* Inactive-page notes collapse to a compact source pill. The Canvas node still
+   exists spatially, so moving/selection/history semantics remain native. */
+.canvas-node.jot-canvas-linked-note-collapsed > .canvas-node-container,
+.canvas-node.jot-canvas-linked-note-collapsed > .canvas-node-content {
+	opacity: 0;
+	pointer-events: none;
+}
+
+.canvas-node.jot-canvas-linked-note-collapsed > .jot-canvas-linked-note-header {
+	inset: 0;
+	width: 100%;
+	max-width: none;
+	height: 100%;
+	padding: 5px 6px;
+	border-radius: 12px;
+	background: color-mix(in srgb, var(--interactive-accent) 18%, var(--background-primary));
+	border-color: color-mix(in srgb, var(--interactive-accent) 55%, var(--background-modifier-border));
+	box-shadow: var(--shadow-s);
+}
+
+.canvas-node.jot-canvas-linked-note-collapsed .jot-canvas-linked-note-source {
+	font-size: 12px;
+	font-weight: 600;
+	color: var(--text-normal);
+}
+
+.canvas-node.jot-canvas-linked-note-collapsed .jot-canvas-linked-note-pin {
+	background: color-mix(in srgb, var(--background-primary) 72%, transparent);
+}
+
+/* Keep the explicit movement grip visible above the collapsed linked-note pill. */
+.canvas-node.jot-canvas-linked-note-collapsed > .canvas-kit-move-handle {
+	z-index: 170;
+}
