@@ -180,3 +180,19 @@ Canvas Lab may consume/prevent an event only after an active tool/session explic
 - [ ] Fit button removes excess vertical whitespace without changing PDF zoom.
 - [ ] Previous/next native page buttons remain functional.
 - [ ] Card resize remains available after using Fit.
+
+
+## Beta 16 — page-linked Canvas notes
+
+- [ ] "Note" control on a PDF card creates a normal Canvas text card beside that PDF.
+- [ ] New note persists source PDF path, exact source Canvas node ID, and current page.
+- [ ] Note for the currently visible PDF page stays expanded.
+- [ ] Changing to another PDF page collapses unpinned notes from other pages.
+- [ ] Collapsed linked note becomes a compact page/source pill.
+- [ ] Tapping the collapsed pill jumps the source PDF to that page and expands the note.
+- [ ] Pin keeps a linked note expanded while browsing other PDF pages.
+- [ ] Unpin resumes page-aware collapse behavior.
+- [ ] Handwriting attached to a linked note hides while collapsed and returns when expanded.
+- [ ] Moving a linked note with the explicit grip still works in both expanded and collapsed states.
+- [ ] Close/reopen Canvas; page linkage, pinned state, expanded size, and jump behavior still work.
+- [ ] PDF marker/highlighter, page navigation, Fit, and normal card-local handwriting remain unchanged.
