@@ -2991,7 +2991,10 @@ class CanvasToolbar {
 			const inkEl = inkNode.nodeEl;
 			if (!attachment) {
 				inkEl?.removeClass("canvas-kit-attached-ink");
-				if (inkEl) inkEl.style.zIndex = "";
+				if (inkEl) {
+					inkEl.style.zIndex = "";
+					inkEl.style.display = "";
+				}
 				continue;
 			}
 			inkEl?.addClass("canvas-kit-attached-ink");
@@ -3007,6 +3010,8 @@ class CanvasToolbar {
 			// raises the selected/focused parent, follow it with parent + 1.
 			const parentEl = parent.nodeEl;
 			if (inkEl && parentEl) {
+				const linkedCollapsed = parentEl.hasClass("jot-canvas-linked-note-collapsed");
+				inkEl.style.display = linkedCollapsed ? "none" : "";
 				const computed = Number.parseInt(
 					(parentEl.ownerDocument.defaultView ?? window).getComputedStyle(parentEl).zIndex,
 					10
@@ -3541,7 +3546,7 @@ class MarkerOverlay extends ToolOverlay {
 			".canvas-pencil-bar, .canvas-pencil-subbar, .canvas-pencil-size-popup, " +
 			".canvas-pencil-card-actions, .canvas-pencil-card-search, .canvas-menu, " +
 			".canvas-controls, .canvas-card-menu, .canvas-kit-search-panel, .cp-table-root, " +
-			".pdf-toolbar";
+			".pdf-toolbar, .jot-canvas-linked-note-header";
 
 		const route = (e: PointerEvent) => {
 			if (this.routedPenEvents.has(e)) return;
