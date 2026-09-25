@@ -3000,7 +3000,10 @@ class CanvasToolbar {
 			inkEl?.addClass("canvas-kit-attached-ink");
 			const parent = canvas.nodes.get(attachment.parentId);
 			if (!parent) {
-				if (inkEl) inkEl.style.zIndex = "";
+				if (inkEl) {
+					inkEl.style.zIndex = "";
+					inkEl.style.display = "";
+				}
 				continue;
 			}
 
