@@ -15,11 +15,14 @@ import {
 
 interface CanvasNodeLike {
 	nodeEl?: HTMLElement;
+	text?: string;
 	x?: number;
 	y?: number;
 	width?: number;
 	height?: number;
+	startEditing?: () => void;
 	getData?: () => Record<string, unknown>;
+	setData?: (data: Record<string, unknown>) => void;
 	moveAndResize?: (r: { x: number; y: number; width: number; height: number }) => void;
 	unknownData?: Record<string, unknown>;
 }
@@ -27,6 +30,16 @@ interface CanvasNodeLike {
 export interface CanvasSurfaceHost {
 	wrapperEl: HTMLElement;
 	nodes?: Map<string, CanvasNodeLike>;
+	createTextNode?: (opts: {
+		pos: { x: number; y: number };
+		size?: { width: number; height: number };
+		text?: string;
+		save?: boolean;
+		focus?: boolean;
+	}) => CanvasNodeLike | undefined;
+	requestSave?: (pushHistory?: boolean) => void;
+	requestPushHistory?: { run?: () => void };
+	selectOnly?: (node: CanvasNodeLike) => void;
 }
 
 export interface PdfInkStyle {
@@ -62,6 +75,7 @@ interface TouchScrollSession {
 }
 
 interface NativePageControlsState {
+	canvas: CanvasSurfaceHost;
 	node: CanvasNodeLike;
 	nodeEl: HTMLElement;
 	pdfPath: string;
@@ -71,13 +85,30 @@ interface NativePageControlsState {
 	prevButton: HTMLButtonElement;
 	nextButton: HTMLButtonElement;
 	fitButton: HTMLButtonElement;
+	linkButton: HTMLButtonElement;
 	scrollHost: HTMLElement | null;
 	onScroll: () => void;
 	lastPage: number;
 	totalPages: number;
 }
 
+interface PdfLinkedNote {
+	sourceType: "pdf";
+	sourcePath: string;
+	sourceNodeId: string;
+	page: number;
+	pinned: boolean;
+	expandedWidth: number;
+	expandedHeight: number;
+}
+
 const NATIVE_CONTROLS_CLASS = "jot-canvas-pdf-native-page-controls";
+const LINKED_NOTE_CLASS = "jot-canvas-linked-note";
+const LINKED_NOTE_COLLAPSED_CLASS = "jot-canvas-linked-note-collapsed";
+const LINKED_NOTE_HEADER_CLASS = "jot-canvas-linked-note-header";
+const LINKED_NOTE_KEY = "jotCanvasPdfLink";
+const LINKED_NOTE_COLLAPSED_WIDTH = 260;
+const LINKED_NOTE_COLLAPSED_HEIGHT = 52;
 
 function asString(value: unknown): string | null {
 	return typeof value === "string" && value.length > 0 ? value : null;
@@ -120,6 +151,50 @@ function containsPoint(rect: DOMRect, x: number, y: number): boolean {
 
 function clamp01(v: number): number {
 	return Math.max(0, Math.min(1, v));
+}
+
+function nodeBox(node: CanvasNodeLike): { x: number; y: number; width: number; height: number } {
+	const data = node.getData?.() ?? {};
+	const pick = (value: unknown, fallback: number | undefined) => {
+		const n = Number(value);
+		return Number.isFinite(n) ? n : (fallback ?? 0);
+	};
+	return {
+		x: pick(data.x, node.x),
+		y: pick(data.y, node.y),
+		width: pick(data.width, node.width),
+		height: pick(data.height, node.height),
+	};
+}
+
+function readLinkedNote(node: CanvasNodeLike): PdfLinkedNote | null {
+	for (const data of [node.getData?.(), node.unknownData]) {
+		const raw = data?.[LINKED_NOTE_KEY];
+		if (!raw || typeof raw !== "object") continue;
+		const value = raw as Record<string, unknown>;
+		if (value.sourceType !== "pdf") continue;
+		const sourcePath = typeof value.sourcePath === "string" ? value.sourcePath : "";
+		const sourceNodeId = typeof value.sourceNodeId === "string" ? value.sourceNodeId : "";
+		const page = Number(value.page);
+		const expandedWidth = Number(value.expandedWidth);
+		const expandedHeight = Number(value.expandedHeight);
+		if (!sourcePath || !sourceNodeId || !Number.isFinite(page) || page < 1) continue;
+		return {
+			sourceType: "pdf",
+			sourcePath,
+			sourceNodeId,
+			page: Math.max(1, Math.round(page)),
+			pinned: value.pinned === true,
+			expandedWidth: Number.isFinite(expandedWidth) && expandedWidth > 0 ? expandedWidth : 320,
+			expandedHeight: Number.isFinite(expandedHeight) && expandedHeight > 0 ? expandedHeight : 180,
+		};
+	}
+	return null;
+}
+
+function sourceLabel(path: string): string {
+	const normalized = path.replace(/\\/g, "/");
+	return normalized.split("/").pop() || path;
 }
 
 export class PdfSourceSurfaceManager {
@@ -178,8 +253,9 @@ export class PdfSourceSurfaceManager {
 
 	refresh(canvas: CanvasSurfaceHost): number {
 		let count = 0;
-		for (const node of canvas.nodes?.values() ?? []) {
+		for (const [nodeId, node] of canvas.nodes?.entries() ?? []) {
 			if (this.upgradeNode(canvas, node)) count += 1;
+			this.upgradeLinkedNote(canvas, nodeId, node);
 		}
 		return count;
 	}
@@ -307,11 +383,12 @@ export class PdfSourceSurfaceManager {
 			this.bindScrollBoundary(scrollHost);
 			this.upgradePages(nodeEl, pdfPath, scrollHost);
 		}
-		this.ensureNativePageControls(node, nodeEl, pdfPath, scrollHost);
+		this.ensureNativePageControls(canvas, node, nodeEl, pdfPath, scrollHost);
 		return true;
 	}
 
 	private ensureNativePageControls(
+		canvas: CanvasSurfaceHost,
 		node: CanvasNodeLike,
 		nodeEl: HTMLElement,
 		pdfPath: string,
@@ -333,6 +410,7 @@ export class PdfSourceSurfaceManager {
 			existing.nativeInput === nativeInput &&
 			existing.scrollHost === scrollHost
 		) {
+			existing.canvas = canvas;
 			existing.node = node;
 			existing.pdfPath = pdfPath;
 			this.updateNativePageState(existing);
@@ -367,10 +445,18 @@ export class PdfSourceSurfaceManager {
 		fitButton.setAttribute("title", "Fit card to page");
 		fitButton.textContent = "Fit";
 
-		controlsEl.append(prevButton, nextButton, fitButton);
+		const linkButton = doc.createElement("button");
+		linkButton.type = "button";
+		linkButton.className = "jot-canvas-pdf-native-page-button jot-canvas-pdf-link-note-button";
+		linkButton.setAttribute("aria-label", "Create linked note for current PDF page");
+		linkButton.setAttribute("title", "Create linked note");
+		linkButton.textContent = "Note";
+
+		controlsEl.append(prevButton, nextButton, fitButton, linkButton);
 		toolbar.appendChild(controlsEl);
 
 		const state: NativePageControlsState = {
+			canvas,
 			node,
 			nodeEl,
 			pdfPath,
@@ -380,6 +466,7 @@ export class PdfSourceSurfaceManager {
 			prevButton,
 			nextButton,
 			fitButton,
+			linkButton,
 			scrollHost,
 			onScroll: () => this.updateNativePageState(state),
 			lastPage: this.readNativePage(nativeInput),
@@ -404,6 +491,10 @@ export class PdfSourceSurfaceManager {
 		fitButton.addEventListener("click", (e) => {
 			e.preventDefault();
 			this.fitCardToCurrentPage(state);
+		});
+		linkButton.addEventListener("click", (e) => {
+			e.preventDefault();
+			this.createLinkedNote(state);
 		});
 
 		nativeInput.addEventListener("input", state.onScroll);
@@ -464,6 +555,249 @@ export class PdfSourceSurfaceManager {
 					detail: { pdfPath: state.pdfPath, page, totalPages },
 				})
 			);
+		}
+		this.syncLinkedNotes(state.canvas);
+	}
+
+	private nodeIdFor(canvas: CanvasSurfaceHost, target: CanvasNodeLike): string | null {
+		for (const [id, node] of canvas.nodes?.entries() ?? []) {
+			if (node === target) return id;
+		}
+		return null;
+	}
+
+	private writeLinkedNote(
+		canvas: CanvasSurfaceHost,
+		node: CanvasNodeLike,
+		link: PdfLinkedNote
+	): void {
+		const stamp = (data: Record<string, unknown>) => {
+			data[LINKED_NOTE_KEY] = { ...link };
+		};
+		try {
+			if (node.unknownData) stamp(node.unknownData);
+			if (node.getData && node.setData) {
+				const data = node.getData();
+				stamp(data);
+				node.setData(data);
+			}
+			canvas.requestSave?.(false);
+		} catch (err) {
+			console.warn("Jot Canvas Lab: couldn't persist linked PDF note", err);
+		}
+	}
+
+	private createLinkedNote(state: NativePageControlsState): void {
+		const canvas = state.canvas;
+		const sourceNodeId = this.nodeIdFor(canvas, state.node);
+		if (!sourceNodeId || !canvas.createTextNode) return;
+		const page = this.readNativePage(state.nativeInput);
+		const sourceBox = nodeBox(state.node);
+
+		let sameSourceNotes = 0;
+		for (const node of canvas.nodes?.values() ?? []) {
+			const link = readLinkedNote(node);
+			if (link?.sourceNodeId === sourceNodeId) sameSourceNotes += 1;
+		}
+
+		const width = 320;
+		const height = 180;
+		const created = canvas.createTextNode({
+			pos: {
+				x: sourceBox.x + sourceBox.width + 48,
+				y: sourceBox.y + (sameSourceNotes % 4) * 52,
+			},
+			size: { width, height },
+			text: "",
+			save: true,
+			focus: true,
+		});
+		if (!created) return;
+
+		const link: PdfLinkedNote = {
+			sourceType: "pdf",
+			sourcePath: state.pdfPath,
+			sourceNodeId,
+			page,
+			pinned: false,
+			expandedWidth: width,
+			expandedHeight: height,
+		};
+		this.writeLinkedNote(canvas, created, link);
+		canvas.selectOnly?.(created);
+		created.startEditing?.();
+		canvas.requestPushHistory?.run?.();
+		this.scheduleRefresh(canvas);
+	}
+
+	private findSourceState(
+		canvas: CanvasSurfaceHost,
+		link: PdfLinkedNote
+	): NativePageControlsState | null {
+		let pathFallback: NativePageControlsState | null = null;
+		for (const state of this.nativePageControls.values()) {
+			if (state.canvas !== canvas) continue;
+			const id = this.nodeIdFor(canvas, state.node);
+			if (id === link.sourceNodeId) return state;
+			if (!pathFallback && state.pdfPath === link.sourcePath) pathFallback = state;
+		}
+		return pathFallback;
+	}
+
+	private upgradeLinkedNote(
+		canvas: CanvasSurfaceHost,
+		nodeId: string,
+		node: CanvasNodeLike
+	): void {
+		const el = node.nodeEl;
+		const link = readLinkedNote(node);
+		if (!el || !link) {
+			el?.classList.remove(LINKED_NOTE_CLASS, LINKED_NOTE_COLLAPSED_CLASS);
+			el?.querySelector(`:scope > .${LINKED_NOTE_HEADER_CLASS}`)?.remove();
+			return;
+		}
+
+		el.classList.add(LINKED_NOTE_CLASS);
+		el.dataset.jotCanvasLinkedPage = String(link.page);
+		el.dataset.jotCanvasLinkedSource = link.sourcePath;
+		this.ensureLinkedNoteHeader(canvas, nodeId, node, el, link);
+		this.syncLinkedNoteNode(canvas, node, el, link);
+	}
+
+	private ensureLinkedNoteHeader(
+		canvas: CanvasSurfaceHost,
+		nodeId: string,
+		node: CanvasNodeLike,
+		el: HTMLElement,
+		link: PdfLinkedNote
+	): void {
+		let header = el.querySelector<HTMLElement>(`:scope > .${LINKED_NOTE_HEADER_CLASS}`);
+		if (!header) {
+			header = el.ownerDocument.createElement("div");
+			header.className = LINKED_NOTE_HEADER_CLASS;
+
+			const sourceButton = el.ownerDocument.createElement("button");
+			sourceButton.type = "button";
+			sourceButton.className = "jot-canvas-linked-note-source";
+			sourceButton.setAttribute("aria-label", "Jump to linked PDF page");
+
+			const pinButton = el.ownerDocument.createElement("button");
+			pinButton.type = "button";
+			pinButton.className = "jot-canvas-linked-note-pin";
+			pinButton.setAttribute("aria-label", "Pin linked note open");
+
+			header.append(sourceButton, pinButton);
+			el.appendChild(header);
+
+			const stop = (e: Event) => e.stopPropagation();
+			header.addEventListener("pointerdown", stop);
+			header.addEventListener("pointerup", stop);
+
+			sourceButton.addEventListener("click", (e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				const current = readLinkedNote(node);
+				if (!current) return;
+				const source = this.findSourceState(canvas, current);
+				if (!source) return;
+				this.commitNativePage(source, current.page);
+				this.syncLinkedNotes(canvas);
+			});
+
+			pinButton.addEventListener("click", (e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				const current = readLinkedNote(node);
+				if (!current) return;
+				const next = { ...current, pinned: !current.pinned };
+				this.writeLinkedNote(canvas, node, next);
+				this.syncLinkedNoteNode(canvas, node, el, next);
+				canvas.requestPushHistory?.run?.();
+			});
+		}
+
+		const sourceButton = header.querySelector<HTMLButtonElement>(".jot-canvas-linked-note-source");
+		const pinButton = header.querySelector<HTMLButtonElement>(".jot-canvas-linked-note-pin");
+		if (sourceButton) {
+			sourceButton.textContent = `p.${link.page} · ${sourceLabel(link.sourcePath)}`;
+			sourceButton.title = `Jump to ${sourceLabel(link.sourcePath)}, page ${link.page}`;
+		}
+		if (pinButton) {
+			pinButton.textContent = link.pinned ? "📌" : "Pin";
+			pinButton.classList.toggle("is-pinned", link.pinned);
+			pinButton.setAttribute(
+				"aria-label",
+				link.pinned ? "Unpin linked note" : "Pin linked note open"
+			);
+		}
+		el.dataset.jotCanvasLinkedNodeId = nodeId;
+	}
+
+	private syncLinkedNotes(canvas: CanvasSurfaceHost): void {
+		for (const node of canvas.nodes?.values() ?? []) {
+			const link = readLinkedNote(node);
+			const el = node.nodeEl;
+			if (!link || !el) continue;
+			this.syncLinkedNoteNode(canvas, node, el, link);
+		}
+	}
+
+	private syncLinkedNoteNode(
+		canvas: CanvasSurfaceHost,
+		node: CanvasNodeLike,
+		el: HTMLElement,
+		link: PdfLinkedNote
+	): void {
+		const source = this.findSourceState(canvas, link);
+		// If the source PDF isn't mounted yet, keep the note expanded rather than
+		// unexpectedly hiding content.
+		const shouldExpand = !source || link.pinned || source.lastPage === link.page;
+		const box = nodeBox(node);
+
+		if (shouldExpand) {
+			const wasCollapsed = el.classList.contains(LINKED_NOTE_COLLAPSED_CLASS);
+			el.classList.remove(LINKED_NOTE_COLLAPSED_CLASS);
+			if (wasCollapsed && node.moveAndResize) {
+				node.moveAndResize({
+					x: box.x,
+					y: box.y,
+					width: link.expandedWidth,
+					height: link.expandedHeight,
+				});
+			} else if (
+				!wasCollapsed &&
+				(box.width > LINKED_NOTE_COLLAPSED_WIDTH + 2 ||
+					box.height > LINKED_NOTE_COLLAPSED_HEIGHT + 2) &&
+				(Math.abs(box.width - link.expandedWidth) > 1 ||
+					Math.abs(box.height - link.expandedHeight) > 1)
+			) {
+				this.writeLinkedNote(canvas, node, {
+					...link,
+					expandedWidth: Math.max(180, box.width),
+					expandedHeight: Math.max(100, box.height),
+				});
+			}
+			return;
+		}
+
+		if (!el.classList.contains(LINKED_NOTE_COLLAPSED_CLASS)) {
+			const expandedWidth =
+				box.width > LINKED_NOTE_COLLAPSED_WIDTH + 2 ? box.width : link.expandedWidth;
+			const expandedHeight =
+				box.height > LINKED_NOTE_COLLAPSED_HEIGHT + 2 ? box.height : link.expandedHeight;
+			const next = {
+				...link,
+				expandedWidth: Math.max(180, expandedWidth),
+				expandedHeight: Math.max(100, expandedHeight),
+			};
+			this.writeLinkedNote(canvas, node, next);
+			el.classList.add(LINKED_NOTE_COLLAPSED_CLASS);
+			node.moveAndResize?.({
+				x: box.x,
+				y: box.y,
+				width: Math.min(next.expandedWidth, LINKED_NOTE_COLLAPSED_WIDTH),
+				height: LINKED_NOTE_COLLAPSED_HEIGHT,
+			});
 		}
 	}
 
@@ -550,6 +884,7 @@ export class PdfSourceSurfaceManager {
 		state.prevButton.disabled = page <= 1;
 		state.nextButton.disabled = state.totalPages > 0 && page >= state.totalPages;
 		state.nodeEl.dataset.jotCanvasCurrentPage = String(page);
+		this.syncLinkedNotes(state.canvas);
 	}
 
 	private observePdfNodeResize(nodeEl: HTMLElement): void {
